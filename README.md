@@ -6,7 +6,6 @@
 An AI product-intelligence platform built on the **Base44 Backend** for the Base44 Dev Build-Off (July 21–28, 2026).
 
 **Live app:** https://prism-ai-76d06220.base44.app
-**Base44 App ID:** `6a67a71379a7f66c76d06220`
 
 ---
 
