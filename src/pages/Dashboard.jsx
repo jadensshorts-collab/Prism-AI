@@ -181,7 +181,7 @@ export default function Dashboard() {
             {[
               "8 layers analyzed in parallel",
               "Six models running in parallel",
-              "Usually under a minute",
+              "Typically 15–60 seconds",
             ].map((f) => (
               <span key={f} className="flex items-center gap-1.5">
                 <span className="w-1 h-1 rounded-full spectrum-bar" />

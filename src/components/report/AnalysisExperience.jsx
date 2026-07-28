@@ -157,7 +157,7 @@ export default function AnalysisExperience({ project, sections, live, onRetry })
         <p className="text-center text-[12px] text-faint mt-6 leading-relaxed">
           Prism is running {SECTION_ORDER.length + 1} AI analysis passes across parallel models.
           <br />
-          This usually takes under a minute — you can safely leave and come back.
+          Typically 15–60 seconds — you can safely leave and come back.
         </p>
       )}
     </div>

@@ -12,7 +12,7 @@ An AI product-intelligence platform built on the **Base44 Backend** for the Base
 
 Every founder, PM, and indie hacker studies products they admire — then guesses. They can see the surface (the UI, the pricing page) but not the layers underneath: why the onboarding is shaped that way, which habit loop drives retention, where the business is actually exposed. That research takes days and usually produces a document nobody acts on.
 
-Prism compresses it into under a minute, and — critically — doesn't stop at analysis. It converts findings into an original product concept, a build-ready PRD, and prompts tuned to the AI builder you'll actually use.
+Prism compresses it into well under a minute, and — critically — doesn't stop at analysis. It converts findings into an original product concept, a build-ready PRD, and prompts tuned to the AI builder you'll actually use.
 
 ## What it does
 

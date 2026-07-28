@@ -632,7 +632,11 @@ Deno.serve(async (req) => {
           prompt: def.prompt(context),
           schema: def.schema,
           model: SECTION_MODEL[def.key],
-          maxTokens: def.key === "innovation" ? 3000 : 2600,
+          // Reserved tokens count against the per-minute budget whether or not
+          // they are used, so these are sized to real output (layers land at
+          // roughly 600–1300 tokens) rather than padded. Smaller reservations
+          // mean more of the pipeline fits in one window.
+          maxTokens: def.key === "innovation" ? 2600 : 2100,
         });
         await base44.entities.ReportSection.update(row.id, { status: "complete", data });
         done += 1;
