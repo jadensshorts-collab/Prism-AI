@@ -206,7 +206,7 @@ export default function BuildStudio({ project }) {
 
 /* ---------- Step 1: Evolution ---------- */
 
-function GeneratingCard({ icon: Icon, title, lines }) {
+function GeneratingCard({ icon: Icon, title, lines, note }) {
   const [i, setI] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setI((v) => (v + 1) % lines.length), 2600);
@@ -232,6 +232,7 @@ function GeneratingCard({ icon: Icon, title, lines }) {
           {lines[i]}
         </motion.p>
       </AnimatePresence>
+      {note && <p className="text-[11.5px] text-faint mt-4">{note}</p>}
     </div>
   );
 }
@@ -542,6 +543,7 @@ function PromptsStep({ prd, prompts, recommendation, working, onGenerate, onBack
           "Speccing v0 components…",
           "8 platforms, 8 native prompts…",
         ]}
+        note="Eight separate prompts, compiled in waves to stay inside model rate limits — this takes about a minute and a half."
       />
     );
   }

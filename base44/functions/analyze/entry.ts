@@ -376,13 +376,15 @@ const MODELS = [
 
 // Each layer is pinned to a different model so seven concurrent calls sit in
 // seven separate rate-limit buckets instead of one.
+// Balanced so no model carries more than two concurrent layers: three on the
+// 12k bucket was hitting the ceiling and forcing retries that doubled runtime.
 const SECTION_MODEL: Record<string, string> = {
   business: "llama-3.3-70b-versatile",
+  competitors: "llama-3.3-70b-versatile",
   design: "openai/gpt-oss-120b",
   technology: "openai/gpt-oss-20b",
   psychology: "qwen/qwen3.6-27b",
-  growth: "llama-3.3-70b-versatile",
-  competitors: "llama-3.3-70b-versatile",
+  growth: "qwen/qwen3.6-27b",
   innovation: "openai/gpt-oss-120b",
 };
 
@@ -569,7 +571,9 @@ Deno.serve(async (req) => {
     await update({ status: "analyzing", stage: "Discovering product structure", progress: 4 });
 
     const recon = await invokeJson(base44, {
-      model: "llama-3.3-70b-versatile",
+      // Runs before the fan-out on a model only one layer uses, so it leaves the
+      // busiest buckets untouched.
+      model: "openai/gpt-oss-20b",
       maxTokens: 2200,
       prompt:
         `You are Prism AI, a product intelligence engine. Identify and profile the digital product at or named: "${project.input_url}". If it is an app store URL, profile that app. Be factual and specific — only state things you actually know about this product, and omit anything you are unsure of rather than inventing it.`,

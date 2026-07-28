@@ -56,7 +56,7 @@ Interactive report → Strategist → Evolution → PRD → Builder prompts
 | **Row-level security** | Every entity is creator-scoped (`created_by == user.email`) for read/update/delete — users can only ever reach their own intelligence. |
 | **Backend functions** | 10 Deno functions: `analyze`, `retry-section`, `strategist`, `evolve`, `generate-prd`, `generate-prompts`, `export-artifact`, `share-report`, `public-report`, `delete-project` (cascading delete across six entities). |
 | **AI orchestration** | Roughly 20 structured LLM calls per full workflow, fanned out across six models via Groq, with schema-guided JSON output and cross-model failover. |
-| **AI Agents** | The `prism_analyst` agent has RLS-scoped **entity tool access** to `Project`, `ReportSection`, `Evolution`, `Prd`, and `GeneratedPrompt`, plus per-user memory. It decides which layers to read, then answers from real stored data — the UI shows each tool call as it happens. |
+| **AI Agents** | The `prism_analyst` agent is defined and deployed with RLS-scoped **entity tool access** to `Project`, `ReportSection`, `Evolution`, `Prd`, and `GeneratedPrompt`, plus per-user memory. Verified making real `read_Project` / `read_ReportSection` tool calls and answering from stored data, with the UI surfacing each call. The agent runtime is metered by the workspace's integration quota; when that quota is exhausted the Strategist transparently falls back to the `strategist` backend function, which grounds the same answers in the stored report. |
 | **Realtime** | Entity `subscribe()` streams pipeline progress live; agent conversations stream tool activity via `subscribeToConversation`. Events act as signals that trigger targeted refetches (the SDK slims payloads over 10 KB). |
 | **Service role** | `public-report` reads shared reports via `asServiceRole` — the single, tightly-scoped path that bypasses RLS, gated on an exact 32-hex token match plus an `is_public` flag. |
 | **Analytics** | `analytics.track` records workflow milestones (`analysis_started`, `evolve_generated`, `prompts_generated`, `report_shared`). |
@@ -98,9 +98,11 @@ Reports are private by default. An owner can mint a share link, publishing a rea
 
 Measured against the deployed app, not estimated:
 
-- Full analysis of a previously unseen product (Figma): **16 s**, 7/7 layers, innovation score 88
+- Full analysis of a previously unseen product (Notion): 7/7 layers, innovation 88, every enum honoured, 14 technologies detected, 5 competitors
 - Evolution concept 4 s → 16-section PRD 12 s → **8/8 builder prompts, 0 failures**
-- Strategist reply 1.8 s, grounded in stored findings
+- Strategist replies in 2–3 s citing competitors by name from the stored report
+- Section retry re-runs a single layer in ~3 s
+- Every invalid input (bad section key, empty message, 2 000-char overflow, unknown export kind) returns a clean 400 — no 500s
 - Export rendered and persisted server-side, re-downloadable
 - Realtime: subscription round-trip confirmed delivering update events
 - Public share: anonymous request returned the full report; revoked links correctly 404

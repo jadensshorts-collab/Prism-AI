@@ -28,6 +28,7 @@ const DevEmpty = import.meta.env.DEV ? lazy(() => import("@/dev/DevEmpty.jsx")) 
 const DevBoom = import.meta.env.DEV ? lazy(() => import("@/dev/DevBoom.jsx")) : null;
 const DevDegraded = import.meta.env.DEV ? lazy(() => import("@/dev/DevDegraded.jsx")) : null;
 const DevStalled = import.meta.env.DEV ? lazy(() => import("@/dev/DevStalled.jsx")) : null;
+const DevGroq = import.meta.env.DEV ? lazy(() => import("@/dev/DevGroq.jsx")) : null;
 
 function RouteFallback() {
   return (
@@ -59,6 +60,7 @@ export default function App() {
               <Route path="/dev/boom" element={<DevBoom />} />
               <Route path="/dev/degraded" element={<DevDegraded />} />
               <Route path="/dev/stalled" element={<DevStalled />} />
+              <Route path="/dev/groq" element={<DevGroq />} />
             </>
           )}
           <Route path="*" element={<Navigate to="/" replace />} />

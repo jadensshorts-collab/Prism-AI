@@ -54,10 +54,11 @@ export default function Deliverables({ project }) {
         for (const parts of groups.values()) {
           parts.sort((a, b) => (a.part || 0) - (b.part || 0));
           const head = parts[0];
-          const doc = {
-            ...head,
-            content: parts.map((p) => p.content || "").join("\n"),
-          };
+          const content = parts.map((p) => p.content || "").join("\n").trim();
+          // A row with no content can only come from an older storage format;
+          // treat it as not generated so we never hand the user an empty file.
+          if (!content) continue;
+          const doc = { ...head, content };
           const prev = byKind.get(head.kind);
           const newer =
             !prev ||

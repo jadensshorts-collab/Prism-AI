@@ -35,6 +35,7 @@ export default function Strategist({ project }) {
   const [activeTools, setActiveTools] = useState([]);
   const [error, setError] = useState("");
   const [viaAgent, setViaAgent] = useState(true);
+  const [agentActive, setAgentActive] = useState(false);
   const convoRef = useRef(null);
   const agentSucceeded = useRef(false);
   const endRef = useRef(null);
@@ -138,6 +139,7 @@ export default function Strategist({ project }) {
         const full = await base44.agents.getConversation(convo.id);
         convoRef.current = full;
         agentSucceeded.current = true;
+        setAgentActive(true);
         setMessages(toView(full?.messages || []));
       } finally {
         try {
@@ -190,7 +192,9 @@ export default function Strategist({ project }) {
             <PrismMark size={15} />
             Prism Analyst
           </div>
-          {viaAgent && (
+          {/* Only claimed once the agent has actually answered — the agent path
+              can be unavailable, in which case the grounded function answers. */}
+          {agentActive && (
             <span className="chip border-emerald/40 text-emerald bg-emerald/10">
               <Zap size={10} />
               Base44 Agent · entity tools
