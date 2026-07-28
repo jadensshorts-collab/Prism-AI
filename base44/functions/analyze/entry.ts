@@ -674,7 +674,7 @@ Deno.serve(async (req) => {
       } catch (err) {
         await base44.entities.ReportSection.update(row.id, {
           status: "failed",
-          error: String(err?.message || err),
+          error: friendlyError(err),
         });
         done += 1;
         await update({ sections_done: done });
@@ -714,11 +714,31 @@ Deno.serve(async (req) => {
 
     return Response.json({ ok: true, projectId, failedSections: failedCount });
   } catch (err) {
+    const message = friendlyError(err);
     await update({
       status: "failed",
       stage: "Analysis failed",
-      error: String(err?.message || err),
+      error: message,
     }).catch(() => null);
-    return Response.json({ error: String(err?.message || err) }, { status: 500 });
+    return Response.json({ error: message }, { status: 500 });
   }
 });
+
+// Provider errors are written straight onto the project and shown to the user,
+// so a raw rate-limit dump (complete with an upsell link) would end up in the
+// UI. Translate the ones we expect into something a person can act on.
+function friendlyError(err: unknown): string {
+  const raw = String((err as { message?: string })?.message ?? err ?? "");
+  if (/rate limit|rate_limit|429/i.test(raw)) {
+    const mins = raw.match(/try again in (\d+)m/i)?.[1];
+    const wait = mins ? `about ${mins} minutes` : "a few minutes";
+    return `The analysis engine is at its usage limit right now. Capacity returns in ${wait} — your other reports are unaffected, and you can retry then.`;
+  }
+  if (/GROQ_API_KEY is not configured/i.test(raw)) {
+    return "The analysis engine is not configured. Set the GROQ_API_KEY secret and try again.";
+  }
+  if (/truncated JSON|no JSON object/i.test(raw)) {
+    return "The model returned an incomplete response. Retrying usually clears it.";
+  }
+  return raw || "The analysis could not be completed.";
+}
