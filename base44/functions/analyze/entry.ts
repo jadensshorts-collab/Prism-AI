@@ -409,6 +409,10 @@ async function groqChat(prompt: string, model: string, maxTokens: number, json: 
       rateLimited?: boolean;
     };
     err.rateLimited = res.status === 429;
+    // Token budgets refill on a rolling minute, so respect the server's hint
+    // instead of guessing at a delay.
+    const ra = Number(res.headers.get("retry-after"));
+    if (Number.isFinite(ra) && ra > 0) (err as { retryAfterMs?: number }).retryAfterMs = Math.min(ra * 1000, 20000);
     throw err;
   }
   const data = await res.json();
@@ -458,13 +462,19 @@ async function invokeJson(
     `${opts.prompt}\n\nRespond with a single JSON object and nothing else. Match this schema ` +
     `exactly — populate every field and keep enum values verbatim:\n${JSON.stringify(opts.schema)}`;
   let lastErr: unknown;
-  for (const model of order) {
-    try {
-      return extractJson(await groqChat(prompt, model, opts.maxTokens ?? 2600, true));
-    } catch (err) {
-      lastErr = err;
-      if ((err as { rateLimited?: boolean })?.rateLimited) await sleep(1200);
+  // Two passes: the first rotates models, the second waits out the rolling
+  // token window so earlier work in the same minute cannot permanently fail this call.
+  for (let pass = 0; pass < 2; pass++) {
+    for (const model of order) {
+      try {
+        return extractJson(await groqChat(prompt, model, opts.maxTokens ?? 2600, true));
+      } catch (err) {
+        lastErr = err;
+        const e429 = err as { rateLimited?: boolean; retryAfterMs?: number };
+        if (e429?.rateLimited) await sleep(e429.retryAfterMs ?? 1500);
+      }
     }
+    if (pass === 0) await sleep(8000);
   }
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }

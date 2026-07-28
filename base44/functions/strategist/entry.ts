@@ -44,7 +44,10 @@ async function groqText(prompt: string, maxTokens = 1800): Promise<string> {
       if (!res.ok) {
         const e = await res.json().catch(() => ({}));
         const err = new Error(e?.error?.message || `Groq HTTP ${res.status}`);
-        if (res.status === 429) await sleep(1200);
+        if (res.status === 429) {
+          const ra = Number(res.headers.get("retry-after"));
+          await sleep(Number.isFinite(ra) && ra > 0 ? Math.min(ra * 1000, 20000) : 1500);
+        }
         throw err;
       }
       const data = await res.json();
