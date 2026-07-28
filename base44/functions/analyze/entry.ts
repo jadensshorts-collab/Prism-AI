@@ -517,6 +517,42 @@ function summarizeLayer(key: string, d: Record<string, any> | null): string {
   return lines.join("\n").slice(0, 1400) || JSON.stringify(d).slice(0, 800);
 }
 
+// Prefer a score the model already implied over asking again: the design layer
+// carries six scored dimensions, psychology scores each technique, and growth
+// scores its SEO posture. Averaging those is faithful to the model's own
+// judgement rather than inventing a number.
+function deriveScore(d: Record<string, any>): number | null {
+  const pools: number[][] = [
+    (d.dimensions || []).map((x: any) => x?.score),
+    (d.techniques || []).map((x: any) => x?.effectiveness),
+    [d?.seo?.score],
+  ];
+  for (const pool of pools) {
+    const nums = pool.filter((n: unknown) => typeof n === "number" && n >= 0 && n <= 100) as number[];
+    if (nums.length) return Math.round(nums.reduce((a, b) => a + b, 0) / nums.length);
+  }
+  return null;
+}
+
+// Last resort: a deliberately tiny call that asks for nothing but the number,
+// so a missing score costs a handful of tokens rather than a whole re-run.
+async function askForScore(title: string, d: Record<string, any>): Promise<number | null> {
+  try {
+    const gist = JSON.stringify(d).slice(0, 1500);
+    const out = await groqChat(
+      `Based on this ${title} analysis, rate the layer 0-100. Reserve 90+ for category-defining ` +
+        `work and score conventional products 50-75. Reply with only {"score": <number>}.\n\n${gist}`,
+      "llama-3.1-8b-instant",
+      40,
+      true,
+    );
+    const n = extractJson(out)?.score;
+    return typeof n === "number" && n >= 0 && n <= 100 ? Math.round(n) : null;
+  } catch {
+    return null;
+  }
+}
+
 // Only layers that actually carry a score are asked for one; competitor
 // intelligence is qualitative and has no score field in its schema.
 function scoreDemand(key: string): string {
@@ -663,6 +699,19 @@ Deno.serve(async (req) => {
           // mean more of the pipeline fits in one window.
           maxTokens: def.key === "innovation" ? 2600 : 2100,
         });
+
+        // Asking for the score in the prompt is not reliably honoured, and a
+        // layer without one vanishes from the dashboard and compare view. If it
+        // is missing, first derive it from sub-scores the model did produce,
+        // and only then spend a tiny follow-up call to get the number.
+        if (def.key !== "competitors" && def.key !== "innovation" && typeof data.score !== "number") {
+          const derived = deriveScore(data);
+          if (derived !== null) {
+            data.score = derived;
+          } else {
+            data.score = await askForScore(def.title, data);
+          }
+        }
         await base44.entities.ReportSection.update(row.id, { status: "complete", data });
         done += 1;
         await update({
