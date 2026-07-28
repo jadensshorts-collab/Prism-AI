@@ -1,4 +1,4 @@
-// Prism AI — PRD Generator. Produces a complete, build-ready Product
+﻿// Prism AI â€” PRD Generator. Produces a complete, build-ready Product
 // Requirements Document from an Evolution concept. Generated in two focused
 // passes (product + engineering) for depth, then stitched into one document.
 import { createClientFromRequest } from "npm:@base44/sdk";
@@ -8,6 +8,11 @@ import { createClientFromRequest } from "npm:@base44/sdk";
 // line-up. Structured output uses json_object mode with the schema inlined in
 // the prompt (strict json_schema is only supported by part of the line-up).
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+// A single call may spend at most this long retrying across models. Beyond
+// it we fail fast so the surrounding function finishes well inside the
+// platform's request timeout and the caller can retry just that piece.
+const RETRY_BUDGET_MS = 110000;
+
 const MODELS = [
   "llama-3.3-70b-versatile",
   "openai/gpt-oss-120b",
@@ -40,7 +45,7 @@ async function groqChat(prompt: string, model: string, maxTokens: number, json: 
     // Token budgets refill on a rolling minute, so respect the server's hint
     // instead of guessing at a delay.
     const ra = Number(res.headers.get("retry-after"));
-    if (Number.isFinite(ra) && ra > 0) (err as { retryAfterMs?: number }).retryAfterMs = Math.min(ra * 1000, 20000);
+    if (Number.isFinite(ra) && ra > 0) (err as { retryAfterMs?: number }).retryAfterMs = Math.min(ra * 1000, 8000);
     throw err;
   }
   const data = await res.json();
@@ -85,21 +90,23 @@ async function groqJson(
   const order = [opts.model || MODELS[0], ...MODELS].filter((v, i, a) => a.indexOf(v) === i);
   const full =
     `${prompt}\n\nRespond with a single JSON object and nothing else. Match this schema ` +
-    `exactly — populate every field and keep enum values verbatim:\n${JSON.stringify(schema)}`;
+    `exactly â€” populate every field and keep enum values verbatim:\n${JSON.stringify(schema)}`;
   let lastErr: unknown;
+  const deadline = Date.now() + RETRY_BUDGET_MS;
   // Two passes: the first rotates models, the second waits out the rolling
   // token window so earlier work in the same minute cannot permanently fail this call.
   for (let pass = 0; pass < 2; pass++) {
     for (const model of order) {
+      if (Date.now() > deadline) break;
       try {
         return extractJson(await groqChat(full, model, opts.maxTokens ?? 2600, true));
       } catch (err) {
         lastErr = err;
         const e429 = err as { rateLimited?: boolean; retryAfterMs?: number };
-        if (e429?.rateLimited) await sleep(e429.retryAfterMs ?? 1500);
+        if (e429?.rateLimited) await sleep(Math.min(e429.retryAfterMs ?? 1200, 8000));
       }
     }
-    if (pass === 0) await sleep(8000);
+    if (pass === 0 && Date.now() < deadline) await sleep(4000);
   }
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
@@ -107,20 +114,22 @@ async function groqJson(
 async function groqText(prompt: string, maxTokens = 2600, model?: string): Promise<string> {
   const order = [model || MODELS[0], ...MODELS].filter((v, i, a) => a.indexOf(v) === i);
   let lastErr: unknown;
+  const deadline = Date.now() + RETRY_BUDGET_MS;
   // Two passes: the first rotates models, the second waits out the rolling
   // token window so earlier work in the same minute cannot permanently fail this call.
   for (let pass = 0; pass < 2; pass++) {
     for (const m of order) {
+      if (Date.now() > deadline) break;
       try {
         const out = await groqChat(prompt, m, maxTokens, false);
         if (out && out.trim()) return out;
       } catch (err) {
         lastErr = err;
         const e429 = err as { rateLimited?: boolean; retryAfterMs?: number };
-        if (e429?.rateLimited) await sleep(e429.retryAfterMs ?? 1500);
+        if (e429?.rateLimited) await sleep(Math.min(e429.retryAfterMs ?? 1200, 8000));
       }
     }
-    if (pass === 0) await sleep(8000);
+    if (pass === 0 && Date.now() < deadline) await sleep(4000);
   }
   throw lastErr instanceof Error ? lastErr : new Error("Groq returned no content");
 }
@@ -162,11 +171,11 @@ Deno.serve(async (req) => {
     2,
   ).slice(0, 2000);
 
-  const shared = `You are Prism AI's PRD engine writing a production-grade Product Requirements Document for "${evolution.title}" — an original product concept born from analyzing ${project.product_name}.
+  const shared = `You are Prism AI's PRD engine writing a production-grade Product Requirements Document for "${evolution.title}" â€” an original product concept born from analyzing ${project.product_name}.
 
 The PRD must be detailed enough that an AI coding agent could build the product from it alone. Write in clean markdown with ## section headers. Be specific: real field names, real flows, real priorities. No filler like "this section describes...".
 
-CRITICAL — density over length. You have a hard output budget and MUST finish every section you are asked for:
+CRITICAL â€” density over length. You have a hard output budget and MUST finish every section you are asked for:
 - Keep each numbered section to roughly 120-200 words.
 - Prefer tables and tight bullets over paragraphs.
 - Never include long JSON or code samples; one short line of shape is enough.
@@ -204,11 +213,11 @@ You MUST reach section 6. Start directly with "## 1. Product Vision".`;
 Write ONLY these sections, in this order (continue numbering from 7):
 
 ## 7. Database Structure
-(every entity with fields, types, and relationships — use tables)
+(every entity with fields, types, and relationships â€” use tables)
 ## 8. Backend Architecture
 (services, background jobs, pipelines, rate limiting)
 ## 9. API Requirements
-(the 6-8 most important endpoints: method, path, payload, response, auth — be concise, no long JSON samples)
+(the 6-8 most important endpoints: method, path, payload, response, auth â€” be concise, no long JSON samples)
 
 You MUST reach section 9. Stop after it. Start directly with "## 7. Database Structure".`;
 
@@ -301,12 +310,12 @@ You MUST reach section 16. Start directly with "## 12. Notifications".`;
     // Any section still absent gets an explicit placeholder rather than a silent
     // gap, so the document never misrepresents itself as complete.
     const ordered = Array.from({ length: 16 }, (_, i) => i + 1).map((n) =>
-      blocks.get(n) ?? `## ${n}. ${SECTION_TITLES[n]}\n\n_Not generated — regenerate the PRD to fill this section._`,
+      blocks.get(n) ?? `## ${n}. ${SECTION_TITLES[n]}\n\n_Not generated â€” regenerate the PRD to fill this section._`,
     );
     body = ordered.join("\n\n");
 
     const content =
-      `# ${evolution.title} — Product Requirements Document\n\n` +
+      `# ${evolution.title} â€” Product Requirements Document\n\n` +
       `> Generated by Prism AI from the analysis of ${project.product_name}.\n\n` +
       body +
       "\n";

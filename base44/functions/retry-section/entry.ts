@@ -1,4 +1,4 @@
-// Prism AI — re-runs a single failed (or stale) report section for a project.
+﻿// Prism AI â€” re-runs a single failed (or stale) report section for a project.
 // Section definitions mirror analyze/entry.ts; keep the two in sync.
 import { createClientFromRequest } from "npm:@base44/sdk";
 
@@ -7,6 +7,11 @@ import { createClientFromRequest } from "npm:@base44/sdk";
 // line-up. Structured output uses json_object mode with the schema inlined in
 // the prompt (strict json_schema is only supported by part of the line-up).
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+// A single call may spend at most this long retrying across models. Beyond
+// it we fail fast so the surrounding function finishes well inside the
+// platform's request timeout and the caller can retry just that piece.
+const RETRY_BUDGET_MS = 110000;
+
 const MODELS = [
   "llama-3.3-70b-versatile",
   "openai/gpt-oss-120b",
@@ -39,7 +44,7 @@ async function groqChat(prompt: string, model: string, maxTokens: number, json: 
     // Token budgets refill on a rolling minute, so respect the server's hint
     // instead of guessing at a delay.
     const ra = Number(res.headers.get("retry-after"));
-    if (Number.isFinite(ra) && ra > 0) (err as { retryAfterMs?: number }).retryAfterMs = Math.min(ra * 1000, 20000);
+    if (Number.isFinite(ra) && ra > 0) (err as { retryAfterMs?: number }).retryAfterMs = Math.min(ra * 1000, 8000);
     throw err;
   }
   const data = await res.json();
@@ -84,21 +89,23 @@ async function groqJson(
   const order = [opts.model || MODELS[0], ...MODELS].filter((v, i, a) => a.indexOf(v) === i);
   const full =
     `${prompt}\n\nRespond with a single JSON object and nothing else. Match this schema ` +
-    `exactly — populate every field and keep enum values verbatim:\n${JSON.stringify(schema)}`;
+    `exactly â€” populate every field and keep enum values verbatim:\n${JSON.stringify(schema)}`;
   let lastErr: unknown;
+  const deadline = Date.now() + RETRY_BUDGET_MS;
   // Two passes: the first rotates models, the second waits out the rolling
   // token window so earlier work in the same minute cannot permanently fail this call.
   for (let pass = 0; pass < 2; pass++) {
     for (const model of order) {
+      if (Date.now() > deadline) break;
       try {
         return extractJson(await groqChat(full, model, opts.maxTokens ?? 2600, true));
       } catch (err) {
         lastErr = err;
         const e429 = err as { rateLimited?: boolean; retryAfterMs?: number };
-        if (e429?.rateLimited) await sleep(e429.retryAfterMs ?? 1500);
+        if (e429?.rateLimited) await sleep(Math.min(e429.retryAfterMs ?? 1200, 8000));
       }
     }
-    if (pass === 0) await sleep(8000);
+    if (pass === 0 && Date.now() < deadline) await sleep(4000);
   }
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
@@ -106,20 +113,22 @@ async function groqJson(
 async function groqText(prompt: string, maxTokens = 2600, model?: string): Promise<string> {
   const order = [model || MODELS[0], ...MODELS].filter((v, i, a) => a.indexOf(v) === i);
   let lastErr: unknown;
+  const deadline = Date.now() + RETRY_BUDGET_MS;
   // Two passes: the first rotates models, the second waits out the rolling
   // token window so earlier work in the same minute cannot permanently fail this call.
   for (let pass = 0; pass < 2; pass++) {
     for (const m of order) {
+      if (Date.now() > deadline) break;
       try {
         const out = await groqChat(prompt, m, maxTokens, false);
         if (out && out.trim()) return out;
       } catch (err) {
         lastErr = err;
         const e429 = err as { rateLimited?: boolean; retryAfterMs?: number };
-        if (e429?.rateLimited) await sleep(e429.retryAfterMs ?? 1500);
+        if (e429?.rateLimited) await sleep(Math.min(e429.retryAfterMs ?? 1200, 8000));
       }
     }
-    if (pass === 0) await sleep(8000);
+    if (pass === 0 && Date.now() < deadline) await sleep(4000);
   }
   throw lastErr instanceof Error ? lastErr : new Error("Groq returned no content");
 }
@@ -139,7 +148,7 @@ const SECTIONS: Record<
     title: "Business Layer",
     internet: true,
     prompt: (ctx) =>
-      `You are Prism AI, an elite product intelligence analyst. Analyze the BUSINESS LAYER of the product described below. Research how it actually makes money today. Be specific and concrete — name real pricing tiers, real segments, real numbers where known. Avoid generic filler.\n\nPRODUCT CONTEXT:\n${ctx}`,
+      `You are Prism AI, an elite product intelligence analyst. Analyze the BUSINESS LAYER of the product described below. Research how it actually makes money today. Be specific and concrete â€” name real pricing tiers, real segments, real numbers where known. Avoid generic filler.\n\nPRODUCT CONTEXT:\n${ctx}`,
     schema: {
       type: "object",
       properties: {
@@ -192,7 +201,7 @@ const SECTIONS: Record<
     title: "Design Layer",
     internet: true,
     prompt: (ctx) =>
-      `You are Prism AI, a world-class product design critic (ex-Apple, ex-Linear). Analyze the DESIGN LAYER of the product described below: UI quality, UX decisions, visual hierarchy, accessibility, mobile experience, and branding. Judge like a demanding design director — praise what is genuinely strong, call out what is weak with specifics.\n\nPRODUCT CONTEXT:\n${ctx}`,
+      `You are Prism AI, a world-class product design critic (ex-Apple, ex-Linear). Analyze the DESIGN LAYER of the product described below: UI quality, UX decisions, visual hierarchy, accessibility, mobile experience, and branding. Judge like a demanding design director â€” praise what is genuinely strong, call out what is weak with specifics.\n\nPRODUCT CONTEXT:\n${ctx}`,
     schema: {
       type: "object",
       properties: {
@@ -229,7 +238,7 @@ const SECTIONS: Record<
     title: "Technology Layer",
     internet: true,
     prompt: (ctx) =>
-      `You are Prism AI, a principal engineer doing technical due diligence. Detect the TECHNOLOGY LAYER of the product described below: frameworks, libraries, hosting, databases, authentication, payments, analytics, and AI usage. Use public evidence. Mark confidence honestly — 'confirmed' only when publicly documented, 'likely' for strong inference, 'possible' for educated guesses.\n\nPRODUCT CONTEXT:\n${ctx}`,
+      `You are Prism AI, a principal engineer doing technical due diligence. Detect the TECHNOLOGY LAYER of the product described below: frameworks, libraries, hosting, databases, authentication, payments, analytics, and AI usage. Use public evidence. Mark confidence honestly â€” 'confirmed' only when publicly documented, 'likely' for strong inference, 'possible' for educated guesses.\n\nPRODUCT CONTEXT:\n${ctx}`,
     schema: {
       type: "object",
       properties: {
@@ -345,7 +354,7 @@ const SECTIONS: Record<
     title: "Competitor Intelligence",
     internet: true,
     prompt: (ctx) =>
-      `You are Prism AI, a competitive intelligence analyst. Map the COMPETITIVE FIELD of the product described below. Find its 4-6 most relevant real competitors. Compare features, pricing, and positioning honestly — include at least one competitor that is genuinely threatening.\n\nPRODUCT CONTEXT:\n${ctx}`,
+      `You are Prism AI, a competitive intelligence analyst. Map the COMPETITIVE FIELD of the product described below. Find its 4-6 most relevant real competitors. Compare features, pricing, and positioning honestly â€” include at least one competitor that is genuinely threatening.\n\nPRODUCT CONTEXT:\n${ctx}`,
     schema: {
       type: "object",
       properties: {
@@ -375,7 +384,7 @@ const SECTIONS: Record<
     title: "Innovation Meter",
     internet: false,
     prompt: (ctx) =>
-      `You are Prism AI's Innovation Meter — the signature scoring engine of a product intelligence platform. Using the product analysis below, score this product's innovation and find its untapped opportunities.\n\nBe a tough grader: 90+ means genuinely category-defining, 70-89 strong, 50-69 solid but conventional, below 50 undifferentiated.\n\nFor opportunities: do NOT suggest copying competitors. Find genuinely untapped openings — missing features, better workflows, AI leverage, new audiences, automation, monetization, accessibility, enterprise. Each must be specific enough to act on.\n\nFULL ANALYSIS:\n${ctx}`,
+      `You are Prism AI's Innovation Meter â€” the signature scoring engine of a product intelligence platform. Using the product analysis below, score this product's innovation and find its untapped opportunities.\n\nBe a tough grader: 90+ means genuinely category-defining, 70-89 strong, 50-69 solid but conventional, below 50 undifferentiated.\n\nFor opportunities: do NOT suggest copying competitors. Find genuinely untapped openings â€” missing features, better workflows, AI leverage, new audiences, automation, monetization, accessibility, enterprise. Each must be specific enough to act on.\n\nFULL ANALYSIS:\n${ctx}`,
     schema: {
       type: "object",
       properties: {

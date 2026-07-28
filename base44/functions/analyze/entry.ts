@@ -1,4 +1,4 @@
-// Prism AI — analysis pipeline orchestrator.
+﻿// Prism AI â€” analysis pipeline orchestrator.
 // Runs a multi-stage AI analysis of a product: recon first, then all report
 // layers in parallel, then the innovation synthesis which consumes the layers.
 // Progress is written to the Project + ReportSection entities so the client
@@ -30,7 +30,7 @@ const SECTION_DEFS: SectionDef[] = [
     stage: "Mapping the business engine",
     internet: true,
     prompt: (ctx) =>
-      `You are Prism AI, an elite product intelligence analyst. Analyze the BUSINESS LAYER of the product described below. Research how it actually makes money today. Be specific and concrete — name real pricing tiers, real segments, real numbers where known. Avoid generic filler.\n\nPRODUCT CONTEXT:\n${ctx}`,
+      `You are Prism AI, an elite product intelligence analyst. Analyze the BUSINESS LAYER of the product described below. Research how it actually makes money today. Be specific and concrete â€” name real pricing tiers, real segments, real numbers where known. Avoid generic filler.\n\nPRODUCT CONTEXT:\n${ctx}`,
     schema: {
       type: "object",
       properties: {
@@ -92,7 +92,7 @@ const SECTION_DEFS: SectionDef[] = [
     stage: "Deconstructing the design system",
     internet: true,
     prompt: (ctx) =>
-      `You are Prism AI, a world-class product design critic (ex-Apple, ex-Linear). Analyze the DESIGN LAYER of the product described below: UI quality, UX decisions, visual hierarchy, accessibility, mobile experience, and branding. Judge like a demanding design director — praise what is genuinely strong, call out what is weak with specifics.\n\nPRODUCT CONTEXT:\n${ctx}`,
+      `You are Prism AI, a world-class product design critic (ex-Apple, ex-Linear). Analyze the DESIGN LAYER of the product described below: UI quality, UX decisions, visual hierarchy, accessibility, mobile experience, and branding. Judge like a demanding design director â€” praise what is genuinely strong, call out what is weak with specifics.\n\nPRODUCT CONTEXT:\n${ctx}`,
     schema: {
       type: "object",
       properties: {
@@ -132,7 +132,7 @@ const SECTION_DEFS: SectionDef[] = [
     stage: "Detecting the technology stack",
     internet: true,
     prompt: (ctx) =>
-      `You are Prism AI, a principal engineer doing technical due diligence. Detect the TECHNOLOGY LAYER of the product described below: frameworks, libraries, hosting, databases, authentication, payments, analytics, and AI usage. Use public evidence (job postings, docs, engineering blogs, page source patterns, common knowledge about the company). Mark confidence honestly — 'confirmed' only when publicly documented, 'likely' for strong inference, 'possible' for educated guesses.\n\nPRODUCT CONTEXT:\n${ctx}`,
+      `You are Prism AI, a principal engineer doing technical due diligence. Detect the TECHNOLOGY LAYER of the product described below: frameworks, libraries, hosting, databases, authentication, payments, analytics, and AI usage. Use public evidence (job postings, docs, engineering blogs, page source patterns, common knowledge about the company). Mark confidence honestly â€” 'confirmed' only when publicly documented, 'likely' for strong inference, 'possible' for educated guesses.\n\nPRODUCT CONTEXT:\n${ctx}`,
     schema: {
       type: "object",
       properties: {
@@ -264,7 +264,7 @@ const SECTION_DEFS: SectionDef[] = [
     stage: "Mapping the competitive field",
     internet: true,
     prompt: (ctx) =>
-      `You are Prism AI, a competitive intelligence analyst. Map the COMPETITIVE FIELD of the product described below. Find its 4-6 most relevant real competitors. Compare features, pricing, and positioning honestly — include at least one competitor that is genuinely threatening.\n\nPRODUCT CONTEXT:\n${ctx}`,
+      `You are Prism AI, a competitive intelligence analyst. Map the COMPETITIVE FIELD of the product described below. Find its 4-6 most relevant real competitors. Compare features, pricing, and positioning honestly â€” include at least one competitor that is genuinely threatening.\n\nPRODUCT CONTEXT:\n${ctx}`,
     schema: {
       type: "object",
       properties: {
@@ -298,7 +298,7 @@ const INNOVATION_DEF: SectionDef = {
   stage: "Computing innovation score",
   internet: false,
   prompt: (ctx) =>
-    `You are Prism AI's Innovation Meter — the signature scoring engine of a product intelligence platform. Using the full multi-layer analysis below, score this product's innovation and find its untapped opportunities.\n\nBe a tough grader: 90+ means genuinely category-defining, 70-89 strong, 50-69 solid but conventional, below 50 undifferentiated. Scores must be consistent with the evidence in the layers.\n\nFor opportunities: do NOT suggest copying competitors. Find genuinely untapped openings — missing features, better workflows, AI leverage, new audiences, automation, monetization, accessibility, enterprise. Each must be specific enough to act on.\n\nFULL ANALYSIS:\n${ctx}`,
+    `You are Prism AI's Innovation Meter â€” the signature scoring engine of a product intelligence platform. Using the full multi-layer analysis below, score this product's innovation and find its untapped opportunities.\n\nBe a tough grader: 90+ means genuinely category-defining, 70-89 strong, 50-69 solid but conventional, below 50 undifferentiated. Scores must be consistent with the evidence in the layers.\n\nFor opportunities: do NOT suggest copying competitors. Find genuinely untapped openings â€” missing features, better workflows, AI leverage, new audiences, automation, monetization, accessibility, enterprise. Each must be specific enough to act on.\n\nFULL ANALYSIS:\n${ctx}`,
   schema: {
     type: "object",
     properties: {
@@ -366,6 +366,11 @@ const INNOVATION_DEF: SectionDef = {
 // over minor omissions, while json_object yields parseable JSON on every model
 // and the report renderers already treat each field as optional.
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+// A single call may spend at most this long retrying across models. Beyond
+// it we fail fast so the surrounding function finishes well inside the
+// platform's request timeout and the caller can retry just that piece.
+const RETRY_BUDGET_MS = 110000;
+
 const MODELS = [
   "llama-3.3-70b-versatile",
   "openai/gpt-oss-120b",
@@ -414,7 +419,7 @@ async function groqChat(prompt: string, model: string, maxTokens: number, json: 
     // Token budgets refill on a rolling minute, so respect the server's hint
     // instead of guessing at a delay.
     const ra = Number(res.headers.get("retry-after"));
-    if (Number.isFinite(ra) && ra > 0) (err as { retryAfterMs?: number }).retryAfterMs = Math.min(ra * 1000, 20000);
+    if (Number.isFinite(ra) && ra > 0) (err as { retryAfterMs?: number }).retryAfterMs = Math.min(ra * 1000, 8000);
     throw err;
   }
   const data = await res.json();
@@ -462,21 +467,23 @@ async function invokeJson(
   const order = [opts.model || MODELS[0], ...MODELS].filter((v, i, a) => a.indexOf(v) === i);
   const prompt =
     `${opts.prompt}\n\nRespond with a single JSON object and nothing else. Match this schema ` +
-    `exactly — populate every field and keep enum values verbatim:\n${JSON.stringify(opts.schema)}`;
+    `exactly â€” populate every field and keep enum values verbatim:\n${JSON.stringify(opts.schema)}`;
   let lastErr: unknown;
+  const deadline = Date.now() + RETRY_BUDGET_MS;
   // Two passes: the first rotates models, the second waits out the rolling
   // token window so earlier work in the same minute cannot permanently fail this call.
   for (let pass = 0; pass < 2; pass++) {
     for (const model of order) {
+      if (Date.now() > deadline) break;
       try {
         return extractJson(await groqChat(prompt, model, opts.maxTokens ?? 2600, true));
       } catch (err) {
         lastErr = err;
         const e429 = err as { rateLimited?: boolean; retryAfterMs?: number };
-        if (e429?.rateLimited) await sleep(e429.retryAfterMs ?? 1500);
+        if (e429?.rateLimited) await sleep(Math.min(e429.retryAfterMs ?? 1200, 8000));
       }
     }
-    if (pass === 0) await sleep(8000);
+    if (pass === 0 && Date.now() < deadline) await sleep(4000);
   }
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
@@ -498,8 +505,8 @@ function summarizeLayer(key: string, d: Record<string, any> | null): string {
   lines.push(...take(d.weaknesses, 3, (x) => `- weakness: ${String(x).slice(0, 140)}`));
   lines.push(...take(d.strengths, 2, (x) => `- strength: ${String(x).slice(0, 140)}`));
   lines.push(...take(d.detected, 6, (t) => `- tech: ${t?.name} (${t?.category})`));
-  lines.push(...take(d.techniques, 4, (t) => `- psych: ${t?.name} — ${String(t?.why_it_works || "").slice(0, 110)}`));
-  lines.push(...take(d.missing_techniques, 3, (t) => `- missing: ${t?.name} — ${String(t?.opportunity || "").slice(0, 110)}`));
+  lines.push(...take(d.techniques, 4, (t) => `- psych: ${t?.name} â€” ${String(t?.why_it_works || "").slice(0, 110)}`));
+  lines.push(...take(d.missing_techniques, 3, (t) => `- missing: ${t?.name} â€” ${String(t?.opportunity || "").slice(0, 110)}`));
   lines.push(...take(d.recommendations, 3, (x) => `- growth play: ${String(x).slice(0, 140)}`));
   lines.push(
     ...take(d.competitors, 5, (c) =>
@@ -519,7 +526,7 @@ function scoreDemand(key: string): string {
   }
   return (
     '\n\nYou MUST return a numeric "score" between 0 and 100 for this layer. ' +
-    "Judge honestly — reserve 90+ for genuinely category-defining work, and score conventional or " +
+    "Judge honestly â€” reserve 90+ for genuinely category-defining work, and score conventional or " +
     "commodity products in the 50-75 range."
   );
 }
@@ -562,7 +569,7 @@ Deno.serve(async (req) => {
 
   // Rate limit: cap analyses per user per hour.
   // Stored timestamps carry no timezone marker, so pin them to UTC before
-  // comparing against now — otherwise the window is off by the host's offset.
+  // comparing against now â€” otherwise the window is off by the host's offset.
   const asUtc = (s: string) =>
     new Date(/[Zz]$|[+-]\d{2}:?\d{2}$/.test(s) ? s : `${s}Z`).getTime();
   const recent = await base44.entities.Project.list("-created_date", RATE_LIMIT_PER_HOUR);
@@ -571,7 +578,7 @@ Deno.serve(async (req) => {
     if (Date.now() - oldest < 60 * 60 * 1000) {
       await base44.entities.Project.update(projectId, {
         status: "failed",
-        error: "Rate limit reached — please wait a bit before analyzing more products.",
+        error: "Rate limit reached â€” please wait a bit before analyzing more products.",
       });
       return Response.json({ error: "Rate limit reached" }, { status: 429 });
     }
@@ -581,7 +588,7 @@ Deno.serve(async (req) => {
     base44.entities.Project.update(projectId!, data);
 
   try {
-    // ---- Stage 1: recon — identify the product before the layers fan out.
+    // ---- Stage 1: recon â€” identify the product before the layers fan out.
     await update({ status: "analyzing", stage: "Discovering product structure", progress: 4 });
 
     const recon = await invokeJson(base44, {
@@ -590,7 +597,7 @@ Deno.serve(async (req) => {
       model: "openai/gpt-oss-20b",
       maxTokens: 2200,
       prompt:
-        `You are Prism AI, a product intelligence engine. Identify and profile the digital product at or named: "${project.input_url}". If it is an app store URL, profile that app. Be factual and specific — only state things you actually know about this product, and omit anything you are unsure of rather than inventing it.`,
+        `You are Prism AI, a product intelligence engine. Identify and profile the digital product at or named: "${project.input_url}". If it is an app store URL, profile that app. Be factual and specific â€” only state things you actually know about this product, and omit anything you are unsure of rather than inventing it.`,
       schema: {
         type: "object",
         properties: {
@@ -602,7 +609,7 @@ Deno.serve(async (req) => {
           problem_solved: { type: "string", description: "The core problem it solves" },
           value_proposition: { type: "string" },
           key_features: { type: "array", items: { type: "string" }, description: "6-10 headline features" },
-          notable_facts: { type: "array", items: { type: "string" }, description: "Funding, scale, launch year, notable customers — only if publicly known" },
+          notable_facts: { type: "array", items: { type: "string" }, description: "Funding, scale, launch year, notable customers â€” only if publicly known" },
         },
         required: ["product_name", "what_it_does", "value_proposition"],
       },
@@ -652,7 +659,7 @@ Deno.serve(async (req) => {
           model: SECTION_MODEL[def.key],
           // Reserved tokens count against the per-minute budget whether or not
           // they are used, so these are sized to real output (layers land at
-          // roughly 600–1300 tokens) rather than padded. Smaller reservations
+          // roughly 600â€“1300 tokens) rather than padded. Smaller reservations
           // mean more of the pipeline fits in one window.
           maxTokens: def.key === "innovation" ? 2600 : 2100,
         });
@@ -702,7 +709,7 @@ Deno.serve(async (req) => {
       stage: "Analysis complete",
       layer_scores: layerScores,
       innovation_score: innovation.data?.overall_score ?? null,
-      error: failedCount > 0 ? `${failedCount} section(s) failed — retry them from the report.` : "",
+      error: failedCount > 0 ? `${failedCount} section(s) failed â€” retry them from the report.` : "",
     });
 
     return Response.json({ ok: true, projectId, failedSections: failedCount });

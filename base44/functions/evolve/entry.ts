@@ -1,4 +1,4 @@
-// Prism AI — Evolution Mode. Generates an ORIGINAL product concept inspired by
+﻿// Prism AI â€” Evolution Mode. Generates an ORIGINAL product concept inspired by
 // the analysis: not a clone, a leap. Consumes innovation opportunities,
 // competitor weaknesses, and psychology/growth gaps.
 import { createClientFromRequest } from "npm:@base44/sdk";
@@ -8,6 +8,11 @@ import { createClientFromRequest } from "npm:@base44/sdk";
 // line-up. Structured output uses json_object mode with the schema inlined in
 // the prompt (strict json_schema is only supported by part of the line-up).
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+// A single call may spend at most this long retrying across models. Beyond
+// it we fail fast so the surrounding function finishes well inside the
+// platform's request timeout and the caller can retry just that piece.
+const RETRY_BUDGET_MS = 110000;
+
 const MODELS = [
   "llama-3.3-70b-versatile",
   "openai/gpt-oss-120b",
@@ -40,7 +45,7 @@ async function groqChat(prompt: string, model: string, maxTokens: number, json: 
     // Token budgets refill on a rolling minute, so respect the server's hint
     // instead of guessing at a delay.
     const ra = Number(res.headers.get("retry-after"));
-    if (Number.isFinite(ra) && ra > 0) (err as { retryAfterMs?: number }).retryAfterMs = Math.min(ra * 1000, 20000);
+    if (Number.isFinite(ra) && ra > 0) (err as { retryAfterMs?: number }).retryAfterMs = Math.min(ra * 1000, 8000);
     throw err;
   }
   const data = await res.json();
@@ -85,21 +90,23 @@ async function groqJson(
   const order = [opts.model || MODELS[0], ...MODELS].filter((v, i, a) => a.indexOf(v) === i);
   const full =
     `${prompt}\n\nRespond with a single JSON object and nothing else. Match this schema ` +
-    `exactly — populate every field and keep enum values verbatim:\n${JSON.stringify(schema)}`;
+    `exactly â€” populate every field and keep enum values verbatim:\n${JSON.stringify(schema)}`;
   let lastErr: unknown;
+  const deadline = Date.now() + RETRY_BUDGET_MS;
   // Two passes: the first rotates models, the second waits out the rolling
   // token window so earlier work in the same minute cannot permanently fail this call.
   for (let pass = 0; pass < 2; pass++) {
     for (const model of order) {
+      if (Date.now() > deadline) break;
       try {
         return extractJson(await groqChat(full, model, opts.maxTokens ?? 2600, true));
       } catch (err) {
         lastErr = err;
         const e429 = err as { rateLimited?: boolean; retryAfterMs?: number };
-        if (e429?.rateLimited) await sleep(e429.retryAfterMs ?? 1500);
+        if (e429?.rateLimited) await sleep(Math.min(e429.retryAfterMs ?? 1200, 8000));
       }
     }
-    if (pass === 0) await sleep(8000);
+    if (pass === 0 && Date.now() < deadline) await sleep(4000);
   }
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
@@ -107,20 +114,22 @@ async function groqJson(
 async function groqText(prompt: string, maxTokens = 2600, model?: string): Promise<string> {
   const order = [model || MODELS[0], ...MODELS].filter((v, i, a) => a.indexOf(v) === i);
   let lastErr: unknown;
+  const deadline = Date.now() + RETRY_BUDGET_MS;
   // Two passes: the first rotates models, the second waits out the rolling
   // token window so earlier work in the same minute cannot permanently fail this call.
   for (let pass = 0; pass < 2; pass++) {
     for (const m of order) {
+      if (Date.now() > deadline) break;
       try {
         const out = await groqChat(prompt, m, maxTokens, false);
         if (out && out.trim()) return out;
       } catch (err) {
         lastErr = err;
         const e429 = err as { rateLimited?: boolean; retryAfterMs?: number };
-        if (e429?.rateLimited) await sleep(e429.retryAfterMs ?? 1500);
+        if (e429?.rateLimited) await sleep(Math.min(e429.retryAfterMs ?? 1200, 8000));
       }
     }
-    if (pass === 0) await sleep(8000);
+    if (pass === 0 && Date.now() < deadline) await sleep(4000);
   }
   throw lastErr instanceof Error ? lastErr : new Error("Groq returned no content");
 }
@@ -159,8 +168,8 @@ Deno.serve(async (req) => {
     }
     out.push(...take(d.weaknesses, 3, (x) => `weakness: ${String(x).slice(0, 130)}`));
     out.push(...take(d.monetization_opportunities, 3, (x) => `money gap: ${String(x).slice(0, 130)}`));
-    out.push(...take(d.missing_techniques, 3, (t) => `missing: ${t?.name} — ${String(t?.opportunity || "").slice(0, 100)}`));
-    out.push(...take(d.opportunities, 6, (o) => `opportunity: ${o?.title} — ${String(o?.description || "").slice(0, 120)}`));
+    out.push(...take(d.missing_techniques, 3, (t) => `missing: ${t?.name} â€” ${String(t?.opportunity || "").slice(0, 100)}`));
+    out.push(...take(d.opportunities, 6, (o) => `opportunity: ${o?.title} â€” ${String(o?.description || "").slice(0, 120)}`));
     out.push(...take(d.competitors, 4, (c) => `rival ${c?.name}: weak at ${(c?.weaknesses || []).slice(0, 2).join("; ").slice(0, 100)}`));
     if (d.white_space) out.push(`white space: ${String(d.white_space).slice(0, 220)}`);
     return out.join("\n").slice(0, 1200);
@@ -171,7 +180,7 @@ Deno.serve(async (req) => {
     .join("\n\n")
     .slice(0, 7000);
 
-  const prompt = `You are Prism AI's Evolution Engine. You just analyzed "${project.product_name}" (${project.category}). Your job is NOT to clone it. Your job is to conceive an ORIGINAL new product that wins where the analyzed product is weak — powered by the untapped opportunities, competitor weaknesses, and psychology/growth gaps in the analysis below.
+  const prompt = `You are Prism AI's Evolution Engine. You just analyzed "${project.product_name}" (${project.category}). Your job is NOT to clone it. Your job is to conceive an ORIGINAL new product that wins where the analyzed product is weak â€” powered by the untapped opportunities, competitor weaknesses, and psychology/growth gaps in the analysis below.
 
 Rules:
 - The concept must be original and differentiated, not "${project.product_name} but better".
