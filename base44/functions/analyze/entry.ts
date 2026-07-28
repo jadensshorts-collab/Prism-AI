@@ -510,6 +510,20 @@ function summarizeLayer(key: string, d: Record<string, any> | null): string {
   return lines.join("\n").slice(0, 1400) || JSON.stringify(d).slice(0, 800);
 }
 
+// Only layers that actually carry a score are asked for one; competitor
+// intelligence is qualitative and has no score field in its schema.
+function scoreDemand(key: string): string {
+  if (key === "competitors") return "";
+  if (key === "innovation") {
+    return "\n\nYou MUST return a numeric overall_score between 0 and 100, and a numeric score for every facet.";
+  }
+  return (
+    '\n\nYou MUST return a numeric "score" between 0 and 100 for this layer. ' +
+    "Judge honestly — reserve 90+ for genuinely category-defining work, and score conventional or " +
+    "commodity products in the 50-75 range."
+  );
+}
+
 function reconContext(project: Record<string, unknown>): string {
   return JSON.stringify(
     {
@@ -629,7 +643,11 @@ Deno.serve(async (req) => {
         // invokeJson already fails over across every model, so a single call
         // here covers both rate limits and malformed responses.
         const data = await invokeJson(base44, {
-          prompt: def.prompt(context),
+          // A scored layer whose score is omitted disappears from the dashboard,
+          // the compare view, and the rolled-up project record, so the number is
+          // demanded explicitly rather than left to the schema alone. Competitor
+          // intelligence has no score of its own and must not be asked for one.
+          prompt: def.prompt(context) + scoreDemand(def.key),
           schema: def.schema,
           model: SECTION_MODEL[def.key],
           // Reserved tokens count against the per-minute budget whether or not

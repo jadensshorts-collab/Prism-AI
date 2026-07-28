@@ -108,6 +108,34 @@ Measured against the deployed app, not estimated:
 - Public share: anonymous request returned the full report; revoked links correctly 404
 - Cascading delete removed all 20 child rows with zero orphans
 
+## Are the scores meaningful?
+
+A scorer that rates everything in the high eighties is decoration. Prism's was
+checked for calibration, internal consistency, and discrimination.
+
+**It separates category leaders from commodity products by ~21 points:**
+
+| Product | Innovation | Band |
+|---|---|---|
+| Duolingo | 92 | category-defining |
+| Linear | 91 | category-defining |
+| Notion | 88 | strong |
+| LegalZoom | 72 | strong / conventional |
+| FreeConvert | 66 | solid but conventional |
+
+The verdicts match the numbers rather than floating free of them — FreeConvert's
+reads *"solid but conventional — a reliable converter that falls short of
+category-defining innovation,"* and its lowest facet (Differentiation, 55) is
+justified with *"UI and feature set remain similar to existing players."*
+LegalZoom's differentiation score names Rocket Lawyer and ZenBusiness directly.
+
+**Internally consistent, not arbitrary:**
+
+- The headline innovation score sits within **0.0–0.3 points** of the mean of its own six facets across every stored report — the summary genuinely summarises its parts.
+- Every `layer_scores` value matches the score inside the section payload it came from.
+- Each design score tracks the mean of its six scored dimensions.
+- Sub-scores move independently: Notion earns Branding 90 but Accessibility 55 in the same report, so the layers are judged separately rather than inheriting one overall impression.
+
 ## Engineering audit
 
 The app was audited end-to-end rather than spot-checked. Defects found and fixed:
