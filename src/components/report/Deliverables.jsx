@@ -39,10 +39,45 @@ export default function Deliverables({ project }) {
   const [working, setWorking] = useState("");
   const [error, setError] = useState("");
 
+  // Deliverables are stored as ordered chunk rows (entity fields are size
+  // capped), so rebuild each one into a single document for download.
   const load = () =>
     Artifact.filter({ project_id: project.id })
-      .then(setArtifacts)
+      .then((rows) => {
+        const groups = new Map();
+        for (const r of rows) {
+          const key = r.group_id || r.id;
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push(r);
+        }
+        const byKind = new Map();
+        for (const parts of groups.values()) {
+          parts.sort((a, b) => (a.part || 0) - (b.part || 0));
+          const head = parts[0];
+          const doc = {
+            ...head,
+            content: parts.map((p) => p.content || "").join("\n"),
+          };
+          const prev = byKind.get(head.kind);
+          const newer =
+            !prev ||
+            new Date(head.updated_date || head.created_date) >
+              new Date(prev.updated_date || prev.created_date);
+          if (newer) byKind.set(head.kind, doc);
+        }
+        setArtifacts([...byKind.values()]);
+      })
       .catch(() => setArtifacts([]));
+
+  const download = (art) => {
+    const blob = new Blob([art.content || ""], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = art.filename || "prism-export.md";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   useEffect(() => {
     load();
@@ -74,8 +109,8 @@ export default function Deliverables({ project }) {
         <div>
           <h3 className="font-display text-[15px] font-semibold">Stored deliverables</h3>
           <p className="text-[13px] text-muted leading-relaxed mt-1">
-            Prism renders each file on the backend and stores it in Base44 file storage, so every
-            export keeps a permanent link you can share or re-download.
+            Prism renders each document on the backend and persists it to your workspace, so every
+            export stays available to re-download without regenerating it.
           </p>
         </div>
       </div>
@@ -116,15 +151,13 @@ export default function Deliverables({ project }) {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 mt-3">
-                    <a
-                      href={art.file_url}
-                      target="_blank"
-                      rel="noreferrer"
+                    <button
+                      onClick={() => download(art)}
                       className="btn-primary !py-1.5 !px-3 text-[12px] flex-1"
                     >
                       <Download size={13} />
                       Download
-                    </a>
+                    </button>
                     <button
                       onClick={() => generate(k.kind)}
                       disabled={busy}

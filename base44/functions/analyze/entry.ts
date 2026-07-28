@@ -357,24 +357,145 @@ const INNOVATION_DEF: SectionDef = {
   },
 };
 
-// Calls InvokeLLM expecting structured JSON; retries once, dropping the model
-// override on the second attempt in case the override itself is the problem.
-async function invokeJson(
-  base44: ReturnType<typeof createClientFromRequest>,
-  opts: { prompt: string; schema: Record<string, unknown>; internet: boolean; model?: string },
-) {
-  const params: Record<string, unknown> = {
-    prompt: opts.prompt,
-    response_json_schema: opts.schema,
-    add_context_from_internet: opts.internet,
+// --- Groq LLM client -------------------------------------------------------
+// Groq meters tokens-per-minute PER MODEL, so the parallel pipeline spreads its
+// calls across several models to multiply the available budget rather than
+// serialising and making the user wait. Structured output uses `json_object`
+// mode with the schema inlined in the prompt: strict `json_schema` mode is only
+// supported by part of the model line-up and rejects otherwise-usable responses
+// over minor omissions, while json_object yields parseable JSON on every model
+// and the report renderers already treat each field as optional.
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+const MODELS = [
+  "llama-3.3-70b-versatile",
+  "openai/gpt-oss-120b",
+  "openai/gpt-oss-20b",
+  "qwen/qwen3.6-27b",
+  "llama-3.1-8b-instant",
+];
+
+// Each layer is pinned to a different model so seven concurrent calls sit in
+// seven separate rate-limit buckets instead of one.
+const SECTION_MODEL: Record<string, string> = {
+  business: "llama-3.3-70b-versatile",
+  design: "openai/gpt-oss-120b",
+  technology: "openai/gpt-oss-20b",
+  psychology: "qwen/qwen3.6-27b",
+  growth: "llama-3.3-70b-versatile",
+  competitors: "llama-3.3-70b-versatile",
+  innovation: "openai/gpt-oss-120b",
+};
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function groqChat(prompt: string, model: string, maxTokens: number, json: boolean) {
+  const key = Deno.env.get("GROQ_API_KEY");
+  if (!key) throw new Error("GROQ_API_KEY is not configured");
+  const body: Record<string, unknown> = {
+    model,
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0.7,
+    max_completion_tokens: maxTokens,
   };
-  if (opts.model) params.model = opts.model;
-  try {
-    return await base44.integrations.Core.InvokeLLM(params);
-  } catch (_err) {
-    delete params.model;
-    return await base44.integrations.Core.InvokeLLM(params);
+  if (json) body.response_format = { type: "json_object" };
+  const res = await fetch(GROQ_URL, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    const err = new Error(e?.error?.message || `Groq HTTP ${res.status}`) as Error & {
+      rateLimited?: boolean;
+    };
+    err.rateLimited = res.status === 429;
+    throw err;
   }
+  const data = await res.json();
+  return stripReasoning((data?.choices?.[0]?.message?.content ?? "") as string);
+}
+
+// Some models emit chain-of-thought in <think> blocks. None of that belongs
+// in user-facing output, so strip it before the text is stored or shown.
+function stripReasoning(text: string): string {
+  const THINK_BLOCK = new RegExp('<think>[\\s\\S]*?</think>', 'gi');
+  const THINK_TAG = new RegExp('</?think>', 'gi');
+  return text.replace(THINK_BLOCK, '').replace(THINK_TAG, '').trim();
+}
+
+// Pulls the first balanced JSON object out of a response, tolerating fences or
+// stray prose some models emit despite json_object mode.
+function extractJson(text: string): Record<string, any> {
+  const cleaned = text.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    // fall through to brace scanning
+  }
+  const start = cleaned.indexOf("{");
+  if (start === -1) throw new Error("Model returned no JSON object");
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < cleaned.length; i++) {
+    const c = cleaned[i];
+    if (esc) { esc = false; continue; }
+    if (c === "\\") { esc = true; continue; }
+    if (c === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (c === "{") depth++;
+    else if (c === "}" && --depth === 0) return JSON.parse(cleaned.slice(start, i + 1));
+  }
+  throw new Error("Model returned truncated JSON");
+}
+
+// Structured call with cross-model failover, so one model being rate-limited or
+// returning malformed JSON never sinks a section.
+async function invokeJson(
+  _base44: unknown,
+  opts: { prompt: string; schema: Record<string, unknown>; model?: string; maxTokens?: number },
+) {
+  const order = [opts.model || MODELS[0], ...MODELS].filter((v, i, a) => a.indexOf(v) === i);
+  const prompt =
+    `${opts.prompt}\n\nRespond with a single JSON object and nothing else. Match this schema ` +
+    `exactly — populate every field and keep enum values verbatim:\n${JSON.stringify(opts.schema)}`;
+  let lastErr: unknown;
+  for (const model of order) {
+    try {
+      return extractJson(await groqChat(prompt, model, opts.maxTokens ?? 2600, true));
+    } catch (err) {
+      lastErr = err;
+      if ((err as { rateLimited?: boolean })?.rateLimited) await sleep(1200);
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
+
+// Condenses a completed layer into the handful of findings later stages need.
+// Groq's per-minute token budget is far smaller than the raw JSON payloads, so
+// this keeps synthesis prompts inside the window without losing the substance.
+function summarizeLayer(key: string, d: Record<string, any> | null): string {
+  if (!d) return "(unavailable)";
+  const lines: string[] = [];
+  const take = (arr: unknown, n: number, fn: (x: any) => string) =>
+    Array.isArray(arr) ? arr.slice(0, n).map(fn).filter(Boolean) : [];
+
+  if (typeof d.score === "number") lines.push(`score: ${Math.round(d.score)}/100`);
+  for (const field of ["business_model", "overall_assessment", "stack_summary", "summary", "market_position"]) {
+    if (typeof d[field] === "string" && d[field]) lines.push(String(d[field]).slice(0, 320));
+  }
+  lines.push(...take(d.monetization_opportunities, 3, (x) => `- opportunity: ${String(x).slice(0, 140)}`));
+  lines.push(...take(d.weaknesses, 3, (x) => `- weakness: ${String(x).slice(0, 140)}`));
+  lines.push(...take(d.strengths, 2, (x) => `- strength: ${String(x).slice(0, 140)}`));
+  lines.push(...take(d.detected, 6, (t) => `- tech: ${t?.name} (${t?.category})`));
+  lines.push(...take(d.techniques, 4, (t) => `- psych: ${t?.name} — ${String(t?.why_it_works || "").slice(0, 110)}`));
+  lines.push(...take(d.missing_techniques, 3, (t) => `- missing: ${t?.name} — ${String(t?.opportunity || "").slice(0, 110)}`));
+  lines.push(...take(d.recommendations, 3, (x) => `- growth play: ${String(x).slice(0, 140)}`));
+  lines.push(
+    ...take(d.competitors, 5, (c) =>
+      `- competitor: ${c?.name} (${c?.threat_level} threat) weak: ${(c?.weaknesses || []).slice(0, 2).join("; ").slice(0, 120)}`,
+    ),
+  );
+  if (typeof d.white_space === "string" && d.white_space) lines.push(`white space: ${d.white_space.slice(0, 260)}`);
+  return lines.join("\n").slice(0, 1400) || JSON.stringify(d).slice(0, 800);
 }
 
 function reconContext(project: Record<string, unknown>): string {
@@ -434,13 +555,14 @@ Deno.serve(async (req) => {
     base44.entities.Project.update(projectId!, data);
 
   try {
-    // ---- Stage 1: recon — identify the product with live internet context.
+    // ---- Stage 1: recon — identify the product before the layers fan out.
     await update({ status: "analyzing", stage: "Discovering product structure", progress: 4 });
 
     const recon = await invokeJson(base44, {
-      internet: true,
+      model: "llama-3.3-70b-versatile",
+      maxTokens: 2200,
       prompt:
-        `You are Prism AI, a product intelligence engine. Identify and profile the digital product at or named: "${project.input_url}". Use live internet research. If it is an app store URL, profile that app. Be factual and specific.`,
+        `You are Prism AI, a product intelligence engine. Identify and profile the digital product at or named: "${project.input_url}". If it is an app store URL, profile that app. Be factual and specific — only state things you actually know about this product, and omit anything you are unsure of rather than inventing it.`,
       schema: {
         type: "object",
         properties: {
@@ -490,21 +612,14 @@ Deno.serve(async (req) => {
         status: "running",
       });
       try {
-        let data;
-        try {
-          data = await invokeJson(base44, {
-            prompt: def.prompt(context),
-            schema: def.schema,
-            internet: def.internet,
-          });
-        } catch (_first) {
-          // One clean retry for transient LLM failures.
-          data = await invokeJson(base44, {
-            prompt: def.prompt(context),
-            schema: def.schema,
-            internet: def.internet,
-          });
-        }
+        // invokeJson already fails over across every model, so a single call
+        // here covers both rate limits and malformed responses.
+        const data = await invokeJson(base44, {
+          prompt: def.prompt(context),
+          schema: def.schema,
+          model: SECTION_MODEL[def.key],
+          maxTokens: def.key === "innovation" ? 3000 : 2600,
+        });
         await base44.entities.ReportSection.update(row.id, { status: "complete", data });
         done += 1;
         await update({
@@ -527,11 +642,14 @@ Deno.serve(async (req) => {
     const results = await Promise.all(SECTION_DEFS.map((def) => runSection(def, ctx)));
 
     // ---- Stage 3: innovation synthesis over everything we learned.
+    // Feeding the raw layer JSON here would push the request past the model's
+    // per-minute token ceiling, so each layer is condensed to the findings the
+    // synthesis actually reasons over.
     const layerDigest = results
       .filter((r) => r.data)
-      .map((r) => `## ${r.key}\n${JSON.stringify(r.data)}`)
+      .map((r) => `## ${r.key}\n${summarizeLayer(r.key, r.data)}`)
       .join("\n\n");
-    const innovationCtx = `${ctx}\n\nLAYER ANALYSES:\n${layerDigest}`.slice(0, 60000);
+    const innovationCtx = `${ctx.slice(0, 2500)}\n\nLAYER FINDINGS:\n${layerDigest}`.slice(0, 7000);
 
     const innovation = await runSection(INNOVATION_DEF, innovationCtx);
 

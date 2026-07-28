@@ -3,6 +3,112 @@
 // a distinct, platform-native build prompt for each of the 8 supported tools.
 import { createClientFromRequest } from "npm:@base44/sdk";
 
+// --- Groq LLM client -------------------------------------------------------
+// Groq meters tokens-per-minute per model, so calls fail over across the
+// line-up. Structured output uses json_object mode with the schema inlined in
+// the prompt (strict json_schema is only supported by part of the line-up).
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+const MODELS = [
+  "llama-3.3-70b-versatile",
+  "openai/gpt-oss-120b",
+  "openai/gpt-oss-20b",
+  "qwen/qwen3.6-27b",
+  "llama-3.1-8b-instant",
+];
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function groqChat(prompt: string, model: string, maxTokens: number, json: boolean) {
+  const key = Deno.env.get("GROQ_API_KEY");
+  if (!key) throw new Error("GROQ_API_KEY is not configured");
+  const body: Record<string, unknown> = {
+    model,
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0.7,
+    max_completion_tokens: maxTokens,
+  };
+  if (json) body.response_format = { type: "json_object" };
+  const res = await fetch(GROQ_URL, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    const err = new Error(e?.error?.message || `Groq HTTP ${res.status}`) as Error & { rateLimited?: boolean };
+    err.rateLimited = res.status === 429;
+    throw err;
+  }
+  const data = await res.json();
+  return stripReasoning((data?.choices?.[0]?.message?.content ?? "") as string);
+}
+
+// Some models emit chain-of-thought in <think> blocks. None of that belongs
+// in user-facing output, so strip it before the text is stored or shown.
+function stripReasoning(text: string): string {
+  const THINK_BLOCK = new RegExp('<think>[\\s\\S]*?</think>', 'gi');
+  const THINK_TAG = new RegExp('</?think>', 'gi');
+  return text.replace(THINK_BLOCK, '').replace(THINK_TAG, '').trim();
+}
+
+function extractJson(text: string): Record<string, any> {
+  const cleaned = text.replace(/^\`\`\`(?:json)?/i, "").replace(/\`\`\`$/, "").trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    // fall through to brace scanning
+  }
+  const start = cleaned.indexOf("{");
+  if (start === -1) throw new Error("Model returned no JSON object");
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < cleaned.length; i++) {
+    const c = cleaned[i];
+    if (esc) { esc = false; continue; }
+    if (c === "\\") { esc = true; continue; }
+    if (c === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (c === "{") depth++;
+    else if (c === "}" && --depth === 0) return JSON.parse(cleaned.slice(start, i + 1));
+  }
+  throw new Error("Model returned truncated JSON");
+}
+
+async function groqJson(
+  prompt: string,
+  schema: Record<string, unknown>,
+  opts: { model?: string; maxTokens?: number } = {},
+): Promise<Record<string, any>> {
+  const order = [opts.model || MODELS[0], ...MODELS].filter((v, i, a) => a.indexOf(v) === i);
+  const full =
+    `${prompt}\n\nRespond with a single JSON object and nothing else. Match this schema ` +
+    `exactly — populate every field and keep enum values verbatim:\n${JSON.stringify(schema)}`;
+  let lastErr: unknown;
+  for (const model of order) {
+    try {
+      return extractJson(await groqChat(full, model, opts.maxTokens ?? 2600, true));
+    } catch (err) {
+      lastErr = err;
+      if ((err as { rateLimited?: boolean })?.rateLimited) await sleep(1200);
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
+
+async function groqText(prompt: string, maxTokens = 2600, model?: string): Promise<string> {
+  const order = [model || MODELS[0], ...MODELS].filter((v, i, a) => a.indexOf(v) === i);
+  let lastErr: unknown;
+  for (const m of order) {
+    try {
+      const out = await groqChat(prompt, m, maxTokens, false);
+      if (out && out.trim()) return out;
+    } catch (err) {
+      lastErr = err;
+      if ((err as { rateLimited?: boolean })?.rateLimited) await sleep(1200);
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error("Groq returned no content");
+}
+
 const PLATFORM_GUIDES: Record<string, { label: string; guide: string }> = {
   base44: {
     label: "Base44",
@@ -85,12 +191,14 @@ Deno.serve(async (req) => {
       .map((p: { content: string }) => p.content)
       .join("\n");
   }
-  const prdText = prdContent.slice(0, 45000);
+  // Bounded for the model's per-minute token window — the recommendation only
+  // needs the PRD's shape, not every word of it.
+  const prdText = prdContent.slice(0, 3000);
 
   try {
     // ---- 1. Builder recommendation, driven by the PRD's actual requirements.
-    const recommendation = await base44.integrations.Core.InvokeLLM({
-      prompt: `You are Prism AI's Builder Recommendation engine. Based on the PRD below, recommend the best AI development platform to build this product's MVP.
+    const recommendation = await groqJson(
+      `You are Prism AI's Builder Recommendation engine. Based on the PRD below, recommend the best AI development platform to build this product's MVP.
 
 Platforms: Base44 (full-stack app platform with built-in database, auth, backend functions, LLM integrations — fastest path to a working full-stack MVP), Claude Code (agentic CLI for complex custom engineering), Cursor (AI IDE for incremental work in a codebase), Lovable (beautiful React+Supabase UIs), v0 (React/Next.js component generation), Replit Agent (build+deploy in one workspace), Windsurf (agentic IDE with Cascade flows), Codex (autonomous engineering agent).
 
@@ -100,7 +208,7 @@ Rate the project needs (0-100) on: complexity, backend_requirements, ui_complexi
 
 PRD:
 ${prdText}`,
-      response_json_schema: {
+      {
         type: "object",
         properties: {
           recommended: {
@@ -137,17 +245,37 @@ ${prdText}`,
         },
         required: ["recommended", "alternative", "project_needs"],
       },
-    });
+      // Runs on a model the prompt waves below never touch, so it cannot eat
+      // into their per-minute budget.
+      { model: "llama-3.1-8b-instant", maxTokens: 1200 },
+    );
 
     await base44.entities.Project.update(projectId, { builder_recommendation: recommendation });
 
     // ---- 2. One platform-native prompt per builder, in parallel.
     const platforms = Object.keys(PLATFORM_GUIDES);
-    const results = await Promise.allSettled(
-      platforms.map(async (platform) => {
+
+    // Eight prompts at once would exhaust a single model's per-minute budget,
+    // so each platform is pinned to a different model and therefore a different
+    // rate-limit bucket. A condensed PRD keeps every request comfortably inside
+    // its window while preserving the specifics the prompts need.
+    const PROMPT_MODEL: Record<string, string> = {
+      base44: "llama-3.3-70b-versatile",
+      "claude-code": "openai/gpt-oss-120b",
+      cursor: "openai/gpt-oss-20b",
+      lovable: "llama-3.3-70b-versatile",
+      v0: "qwen/qwen3.6-27b",
+      replit: "openai/gpt-oss-20b",
+      windsurf: "openai/gpt-oss-120b",
+      codex: "llama-3.3-70b-versatile",
+    };
+    const prdBrief = prdContent.slice(0, 3500);
+
+    const compileOne = async (platform: string) => {
+      {
         const { label, guide } = PLATFORM_GUIDES[platform];
-        const content = await base44.integrations.Core.InvokeLLM({
-          prompt: `You are Prism AI's prompt engineer. Convert the PRD below into ONE build prompt optimized specifically for ${label}.
+        const content = await groqText(
+          `You are Prism AI's prompt engineer. Convert the PRD below into ONE build prompt optimized specifically for ${label}.
 
 HOW ${label.toUpperCase()} WORKS BEST:
 ${guide}
@@ -160,8 +288,10 @@ Rules:
 - Length: comprehensive but focused (roughly 500-900 words).
 
 PRD:
-${prdText}`,
-        });
+${prdBrief}`,
+          1600,
+          PROMPT_MODEL[platform],
+        );
         const text = (typeof content === "string" ? content : JSON.stringify(content)).trim();
         // Replace any previous prompt for this platform+PRD.
         const existing = await base44.entities.GeneratedPrompt.filter({
@@ -181,8 +311,19 @@ ${prdText}`,
           content: text,
         });
         return row.id;
-      }),
-    );
+      }
+    };
+
+    // Even spread across models, eight simultaneous requests overrun the
+    // per-minute budget. Compiling in small waves keeps every call inside its
+    // window and still finishes in seconds.
+    const WAVE = 2;
+    const results: PromiseSettledResult<string>[] = [];
+    for (let i = 0; i < platforms.length; i += WAVE) {
+      const batch = platforms.slice(i, i + WAVE);
+      results.push(...(await Promise.allSettled(batch.map(compileOne))));
+      if (i + WAVE < platforms.length) await sleep(3000);
+    }
 
     const failed = results.filter((r) => r.status === "rejected").length;
     return Response.json({ ok: true, generated: platforms.length - failed, failed, recommendation });

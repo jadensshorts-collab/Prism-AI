@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Outlet, Link, useLocation } from "react-router-dom";
-import { LayoutGrid, GitCompareArrows, LogOut, ExternalLink } from "lucide-react";
+import { LayoutGrid, GitCompareArrows, LogOut } from "lucide-react";
 import PrismMark from "@/components/PrismMark";
 import Spinner from "@/components/ui/Spinner";
 import { useAuth, signIn, signOut } from "@/lib/useAuth";
@@ -36,7 +36,8 @@ export default function AppLayout() {
       <header className="sticky top-0 z-40 border-b border-edge bg-void/80 backdrop-blur-xl">
         <div className="max-w-7xl mx-auto px-5 h-14 flex items-center justify-between">
           <div className="flex items-center gap-7">
-            <Link to="/app" className="flex items-center gap-2.5">
+            {/* The brand mark is the way back out to the marketing homepage. */}
+            <Link to="/" className="flex items-center gap-2.5" title="Back to the Prism AI homepage">
               <PrismMark size={24} />
               <span className="font-display font-semibold tracking-tight">Prism AI</span>
             </Link>
@@ -64,11 +65,7 @@ export default function AppLayout() {
             </nav>
           </div>
           <div className="flex items-center gap-3">
-            <Link to="/" className="text-[13px] text-faint hover:text-muted transition-colors hidden sm:flex items-center gap-1">
-              <ExternalLink size={12} />
-              Site
-            </Link>
-            <div className="flex items-center gap-2.5 pl-3 border-l border-edge">
+            <div className="flex items-center gap-2.5">
               <div className="w-7 h-7 rounded-full spectrum-bar p-[1.5px]">
                 <div className="w-full h-full rounded-full bg-raised flex items-center justify-center text-[11px] font-semibold">
                   {(user.full_name || user.email || "?")[0].toUpperCase()}

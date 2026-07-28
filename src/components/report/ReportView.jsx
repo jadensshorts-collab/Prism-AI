@@ -17,7 +17,7 @@ import {
   RotateCcw,
   ExternalLink,
 } from "lucide-react";
-import { invokeFunction } from "@/api/base44Client";
+import { invokeFunction, Artifact } from "@/api/base44Client";
 import ScoreRing from "@/components/ui/ScoreRing";
 import Spinner from "@/components/ui/Spinner";
 import { cn, hostnameOf, downloadText, SECTION_META } from "@/lib/utils";
@@ -79,9 +79,16 @@ export default function ReportView({ project, sections, onRefresh, initialTab })
     setExporting(true);
     try {
       const res = await invokeFunction("export-artifact", { projectId: project.id, kind: "report" });
-      const url = res?.data?.file_url;
-      if (!url) throw new Error(res?.data?.error || "Export failed");
-      window.open(url, "_blank", "noopener");
+      if (res?.data?.error) throw new Error(res.data.error);
+      // The backend renders and stores the document; pull the stored copy back
+      // so the file the user gets is exactly what was persisted.
+      const rows = await Artifact.filter({ project_id: project.id, kind: "report" });
+      if (!rows.length) throw new Error("Export produced no document");
+      const md = rows
+        .sort((a, b) => (a.part || 0) - (b.part || 0))
+        .map((r) => r.content || "")
+        .join("\n");
+      downloadText(rows[0].filename || "prism-report.md", md);
     } catch {
       const md = buildReportMarkdown(project, sections);
       const name = (project.product_name || hostnameOf(project.input_url)).replace(/[^\w-]+/g, "-");

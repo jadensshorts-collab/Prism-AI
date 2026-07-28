@@ -13,12 +13,19 @@
       "description": "Which deliverable this file contains"
     },
     "title": { "type": "string" },
-    "file_url": { "type": "string", "description": "Base44 file storage URL" },
+    "file_url": { "type": "string", "description": "Optional external URL, when file storage is used" },
     "filename": { "type": "string" },
     "size_bytes": { "type": "integer" },
-    "summary": { "type": "string", "description": "Short human description of what's inside" }
+    "summary": { "type": "string", "description": "Short human description of what's inside" },
+    "content": {
+      "type": "string",
+      "description": "Rendered markdown chunk (field size is capped, so large deliverables span rows)"
+    },
+    "group_id": { "type": "string", "description": "Groups the chunks of one rendered deliverable" },
+    "part": { "type": "integer", "default": 0 },
+    "parts_total": { "type": "integer", "default": 1 }
   },
-  "required": ["project_id", "kind", "file_url"],
+  "required": ["project_id", "kind"],
   "rls": {
     "create": true,
     "read": { "created_by": "{{user.email}}" },

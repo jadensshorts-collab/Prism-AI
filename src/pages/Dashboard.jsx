@@ -180,7 +180,7 @@ export default function Dashboard() {
           <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-[11.5px] text-faint">
             {[
               "8 layers analyzed in parallel",
-              "Live internet research",
+              "Six models running in parallel",
               "Usually under a minute",
             ].map((f) => (
               <span key={f} className="flex items-center gap-1.5">

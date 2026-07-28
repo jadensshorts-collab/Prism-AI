@@ -3,6 +3,60 @@ import { createClientFromRequest } from "npm:@base44/sdk";
 
 const MAX_HISTORY = 12;
 
+// --- Groq LLM client (free-text) -------------------------------------------
+// Rate limits are metered per model, so failing over across the line-up keeps
+// the strategist answering even when one model is saturated.
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+
+// Some models emit chain-of-thought in <think> blocks. None of that belongs
+// in user-facing output, so strip it before the text is stored or shown.
+function stripReasoning(text: string): string {
+  const THINK_BLOCK = new RegExp('<think>[\\s\\S]*?</think>', 'gi');
+  const THINK_TAG = new RegExp('</?think>', 'gi');
+  return text.replace(THINK_BLOCK, '').replace(THINK_TAG, '').trim();
+}
+const MODELS = [
+  "llama-3.3-70b-versatile",
+  "openai/gpt-oss-120b",
+  "openai/gpt-oss-20b",
+  "qwen/qwen3.6-27b",
+  "llama-3.1-8b-instant",
+];
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function groqText(prompt: string, maxTokens = 1800): Promise<string> {
+  const key = Deno.env.get("GROQ_API_KEY");
+  if (!key) throw new Error("GROQ_API_KEY is not configured");
+  let lastErr: unknown;
+  for (const model of MODELS) {
+    try {
+      const res = await fetch(GROQ_URL, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.7,
+          max_completion_tokens: maxTokens,
+        }),
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        const err = new Error(e?.error?.message || `Groq HTTP ${res.status}`);
+        if (res.status === 429) await sleep(1200);
+        throw err;
+      }
+      const data = await res.json();
+      const out = stripReasoning(data?.choices?.[0]?.message?.content ?? "");
+      if (out && out.trim()) return out;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error("Groq returned no content");
+}
+
 Deno.serve(async (req) => {
   const base44 = createClientFromRequest(req);
   const user = await base44.auth.me().catch(() => null);
@@ -30,10 +84,32 @@ Deno.serve(async (req) => {
     project_id: projectId,
     status: "complete",
   });
+  // Condensed to fit the model's per-minute token budget while keeping the
+  // concrete findings the answer should cite.
+  const summarize = (d: Record<string, any> | null) => {
+    if (!d) return "(unavailable)";
+    const out: string[] = [];
+    const take = (a: unknown, n: number, f: (x: any) => string) =>
+      Array.isArray(a) ? a.slice(0, n).map(f) : [];
+    if (typeof d.score === "number") out.push(`score ${Math.round(d.score)}/100`);
+    if (typeof d.overall_score === "number") out.push(`innovation ${Math.round(d.overall_score)}/100`);
+    for (const k of ["business_model", "overall_assessment", "stack_summary", "summary", "market_position", "verdict"]) {
+      if (typeof d[k] === "string" && d[k]) out.push(String(d[k]).slice(0, 260));
+    }
+    out.push(...take(d.weaknesses, 3, (x) => `weakness: ${String(x).slice(0, 120)}`));
+    out.push(...take(d.strengths, 2, (x) => `strength: ${String(x).slice(0, 120)}`));
+    out.push(...take(d.detected, 5, (t) => `tech: ${t?.name}`));
+    out.push(...take(d.techniques, 3, (t) => `psych: ${t?.name}`));
+    out.push(...take(d.competitors, 4, (c) => `rival ${c?.name} (${c?.threat_level})`));
+    out.push(...take(d.opportunities, 5, (o) => `opportunity: ${o?.title}`));
+    out.push(...take(d.recommendations, 3, (x) => `growth: ${String(x).slice(0, 110)}`));
+    return out.join("\n").slice(0, 1100);
+  };
+
   const reportDigest = sections
-    .map((s: { section_key: string; data: unknown }) => `### ${s.section_key}\n${JSON.stringify(s.data)}`)
+    .map((s: { section_key: string; data: Record<string, any> }) => `### ${s.section_key}\n${summarize(s.data)}`)
     .join("\n\n")
-    .slice(0, 50000);
+    .slice(0, 7000);
 
   const history = await base44.entities.ChatMessage.filter({ project_id: projectId }, "-created_date", MAX_HISTORY);
   const historyText = history
@@ -48,7 +124,7 @@ Deno.serve(async (req) => {
 You have Prism's full multi-layer intelligence report on this product. Ground every answer in this data — cite specific findings (scores, competitors, psychological techniques, opportunities) when relevant. Give sharp, opinionated, actionable advice like a $1,000/hour consultant, not generic tips. Use markdown: short paragraphs, bold key points, bullet lists where they help. Keep answers focused — under 350 words unless the question truly demands more.
 
 PRODUCT OVERVIEW:
-${JSON.stringify(project.overview || {})}
+${JSON.stringify(project.overview || {}).slice(0, 1600)}
 
 INTELLIGENCE REPORT:
 ${reportDigest}
@@ -61,8 +137,7 @@ User: ${message.trim()}
 Respond as the Strategist.`;
 
   try {
-    const reply = await base44.integrations.Core.InvokeLLM({ prompt });
-    const text = typeof reply === "string" ? reply : JSON.stringify(reply);
+    const text = await groqText(prompt, 1800);
     await base44.entities.ChatMessage.create({ project_id: projectId, role: "assistant", content: text });
     return Response.json({ reply: text });
   } catch (err) {

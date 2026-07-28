@@ -9,33 +9,28 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     let alive = true;
-    // createClient() already harvested any token from the OAuth redirect URL
-    // into storage, so an empty store means nobody is signed in. Skipping the
-    // request keeps public pages fast and free of 401 noise.
-    const hasSession =
-      typeof window !== "undefined" &&
-      Boolean(localStorage.getItem("base44_access_token") || localStorage.getItem("token"));
 
-    if (!hasSession) {
-      // The SDK's analytics module runs a heartbeat that re-checks the current
-      // user and flushes a batch on a timer. With no session that loop just
-      // produces a steady stream of 401s on public pages (landing, shared
-      // reports) for telemetry nobody can attribute — so shut it down until
-      // the user actually signs in. Sign-in reloads the page, which rebuilds
-      // the client with a token and restores tracking.
-      try {
-        base44.analytics?.cleanup?.();
-      } catch {
-        // best-effort
-      }
-      setState({ user: null, loading: false });
-      return;
-    }
-
+    // Always ask the server who we are. A returning visitor is often
+    // authenticated by an HTTP-only cookie with nothing in localStorage, so
+    // checking storage alone would sign them out every time they came back.
     base44.auth
       .me()
-      .then((user) => alive && setState({ user, loading: false }))
-      .catch(() => alive && setState({ user: null, loading: false }));
+      .then((user) => {
+        if (alive) setState({ user, loading: false });
+      })
+      .catch(() => {
+        if (!alive) return;
+        // Nobody is signed in. The SDK's analytics module polls the current
+        // user on a timer, which would otherwise emit a steady stream of 401s
+        // on public pages, so stop it until a session exists.
+        try {
+          base44.analytics?.cleanup?.();
+        } catch {
+          // best-effort
+        }
+        setState({ user: null, loading: false });
+      });
+
     return () => {
       alive = false;
     };
@@ -46,24 +41,30 @@ export function AuthProvider({ children }) {
 
 export const useAuth = () => useContext(AuthContext);
 
-export function signIn() {
-  // Custom-site deployments serve the SPA at /login, so Prism hosts its own
-  // sign-in page rather than using the SDK's redirectToLogin.
-  window.location.href = `/login?from_url=${encodeURIComponent(window.location.href)}`;
+export function signIn(nextUrl) {
+  const target = nextUrl || window.location.pathname + window.location.search;
+  window.location.href = `/login?from_url=${encodeURIComponent(target)}`;
 }
 
+// Signing out always lands on the marketing homepage.
 export function signOut() {
-  base44.auth.logout(window.location.origin);
+  try {
+    localStorage.removeItem("base44_access_token");
+    localStorage.removeItem("token");
+  } catch {
+    // storage may be unavailable; the server logout still clears the cookie
+  }
+  base44.auth.logout(window.location.origin + "/");
 }
 
-// Entering the workspace always passes through sign-in when there is no
-// session, landing the user in the workspace itself rather than bouncing them
-// back to the marketing page.
+// Entering the workspace passes through sign-in when there is no session, so
+// the user lands in the workspace itself rather than back on the homepage.
 export function useEnterWorkspace() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const navigate = useNavigate();
   return () => {
     if (user) navigate("/app");
+    else if (loading) navigate("/app"); // AppLayout resolves auth and redirects if needed
     else navigate(`/login?from_url=${encodeURIComponent("/app")}`);
   };
 }

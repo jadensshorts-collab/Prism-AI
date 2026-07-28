@@ -292,8 +292,8 @@ export default function Landing() {
             One product in. <span className="spectrum-text">Eight layers out.</span>
           </h2>
           <p className="text-muted mt-3 max-w-xl mx-auto">
-            Every analysis runs a real multi-stage AI pipeline with live internet research — not a
-            single generic summary.
+            Every analysis runs a real multi-stage AI pipeline, fanned out across parallel models —
+            not a single generic summary.
           </p>
         </motion.div>
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">

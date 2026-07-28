@@ -258,35 +258,53 @@ Deno.serve(async (req) => {
       summary = `${prompts.length} platform-native build prompts.`;
     }
 
-    const file = new File([content], filename, { type: "text/markdown" });
-    const uploaded = await base44.integrations.Core.UploadFile({ file });
-    const fileUrl = uploaded?.file_url || uploaded?.url;
-    if (!fileUrl) throw new Error("Upload did not return a file URL");
+    // The rendered markdown is persisted in the database rather than object
+    // storage: entity string fields are size-capped, so a deliverable is split
+    // at paragraph boundaries across an ordered group of rows and reassembled
+    // on read. This keeps every export durable and re-downloadable without
+    // depending on a metered file-upload integration.
+    const CHUNK = 14000;
+    const chunks: string[] = [];
+    let buf = "";
+    for (const line of content.split("\n")) {
+      if (buf.length + line.length + 1 > CHUNK && buf) {
+        chunks.push(buf);
+        buf = "";
+      }
+      buf += (buf ? "\n" : "") + line;
+    }
+    if (buf) chunks.push(buf);
 
-    // One current artifact per kind per project — replace any previous file row.
+    // One current artifact per kind per project — clear any previous render.
     const existing = await base44.entities.Artifact.filter({ project_id: projectId, kind });
-    const payload = {
-      project_id: projectId,
-      kind,
-      title,
-      file_url: fileUrl,
-      filename,
-      size_bytes: content.length,
-      summary,
-    };
-    let row;
-    if (existing[0]) {
-      row = await base44.entities.Artifact.update(existing[0].id, payload);
-    } else {
-      row = await base44.entities.Artifact.create(payload);
+    await Promise.all(
+      existing.map((r: { id: string }) => base44.entities.Artifact.delete(r.id).catch(() => {})),
+    );
+
+    const groupId = crypto.randomUUID();
+    let firstId = "";
+    for (let i = 0; i < chunks.length; i++) {
+      const row = await base44.entities.Artifact.create({
+        project_id: projectId,
+        kind,
+        title,
+        filename,
+        size_bytes: content.length,
+        summary,
+        content: chunks[i],
+        group_id: groupId,
+        part: i,
+        parts_total: chunks.length,
+      });
+      if (i === 0) firstId = row.id;
     }
 
     return Response.json({
       ok: true,
-      artifactId: row?.id || existing[0]?.id,
-      file_url: fileUrl,
+      artifactId: firstId,
       filename,
       size_bytes: content.length,
+      parts: chunks.length,
     });
   } catch (err) {
     return Response.json({ error: String(err?.message || err) }, { status: 500 });
