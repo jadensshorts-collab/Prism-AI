@@ -1,0 +1,19 @@
+{
+  // One message in a project's AI Product Strategist conversation.
+  "name": "ChatMessage",
+  "type": "object",
+  "title": "Chat Message",
+  "description": "A message in the AI Product Strategist conversation for a project.",
+  "properties": {
+    "project_id": { "type": "string" },
+    "role": { "type": "string", "enum": ["user", "assistant"] },
+    "content": { "type": "string" }
+  },
+  "required": ["project_id", "role", "content"],
+  "rls": {
+    "create": true,
+    "read": { "created_by": "{{user.email}}" },
+    "update": { "created_by": "{{user.email}}" },
+    "delete": { "created_by": "{{user.email}}" }
+  }
+}

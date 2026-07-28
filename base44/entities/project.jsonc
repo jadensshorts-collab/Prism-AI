@@ -1,0 +1,56 @@
+{
+  // A product analysis project — one analyzed product per row.
+  "name": "Project",
+  "type": "object",
+  "title": "Project",
+  "description": "A product intelligence analysis project created from a URL or product name.",
+  "properties": {
+    "input_url": {
+      "type": "string",
+      "description": "The URL or product identifier the user submitted"
+    },
+    "product_name": { "type": "string", "description": "Detected product name" },
+    "tagline": { "type": "string", "description": "One-line description of the product" },
+    "category": { "type": "string", "description": "Market category" },
+    "status": {
+      "type": "string",
+      "enum": ["analyzing", "complete", "failed"],
+      "default": "analyzing"
+    },
+    "progress": { "type": "integer", "minimum": 0, "maximum": 100, "default": 0 },
+    "stage": { "type": "string", "description": "Human-readable current pipeline stage" },
+    "sections_done": { "type": "integer", "default": 0 },
+    "sections_total": { "type": "integer", "default": 8 },
+    "overview": {
+      "type": "object",
+      "description": "Product overview layer: what it does, target users, problem, value prop"
+    },
+    "innovation_score": { "type": "number", "minimum": 0, "maximum": 100 },
+    "layer_scores": {
+      "type": "object",
+      "description": "Per-layer scores: business, design, technology, psychology, growth"
+    },
+    "builder_recommendation": {
+      "type": "object",
+      "description": "Recommended AI builder platform with reasoning, set by generate-prompts"
+    },
+    "is_favorite": { "type": "boolean", "default": false },
+    "agent_conversation_id": {
+      "type": "string",
+      "description": "Prism Analyst agent conversation bound to this project"
+    },
+    "share_token": {
+      "type": "string",
+      "description": "Random token that makes the report readable via a public link"
+    },
+    "is_public": { "type": "boolean", "default": false },
+    "error": { "type": "string" }
+  },
+  "required": ["input_url"],
+  "rls": {
+    "create": true,
+    "read": { "created_by": "{{user.email}}" },
+    "update": { "created_by": "{{user.email}}" },
+    "delete": { "created_by": "{{user.email}}" }
+  }
+}

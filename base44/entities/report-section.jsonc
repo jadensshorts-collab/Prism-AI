@@ -1,0 +1,37 @@
+{
+  // One analysis layer of a project report (business, design, technology, ...).
+  "name": "ReportSection",
+  "type": "object",
+  "title": "Report Section",
+  "description": "A single analyzed layer of a product report, produced by the analyze pipeline.",
+  "properties": {
+    "project_id": { "type": "string", "description": "Parent Project id" },
+    "section_key": {
+      "type": "string",
+      "enum": [
+        "business",
+        "design",
+        "technology",
+        "psychology",
+        "growth",
+        "competitors",
+        "innovation"
+      ]
+    },
+    "title": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["running", "complete", "failed"],
+      "default": "running"
+    },
+    "data": { "type": "object", "description": "Structured layer analysis payload" },
+    "error": { "type": "string" }
+  },
+  "required": ["project_id", "section_key"],
+  "rls": {
+    "create": true,
+    "read": { "created_by": "{{user.email}}" },
+    "update": { "created_by": "{{user.email}}" },
+    "delete": { "created_by": "{{user.email}}" }
+  }
+}

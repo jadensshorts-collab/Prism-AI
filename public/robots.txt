@@ -1,0 +1,7 @@
+# Prism AI
+# The marketing site and shared reports are public; the workspace is not.
+User-agent: *
+Allow: /$
+Allow: /r/
+Disallow: /app
+Disallow: /login

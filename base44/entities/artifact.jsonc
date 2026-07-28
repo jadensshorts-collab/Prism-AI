@@ -1,0 +1,28 @@
+{
+  // A generated, stored deliverable (markdown) produced by the export pipeline
+  // and persisted in Base44 file storage.
+  "name": "Artifact",
+  "type": "object",
+  "title": "Artifact",
+  "description": "A generated file deliverable — intelligence report, PRD, or builder prompt pack.",
+  "properties": {
+    "project_id": { "type": "string" },
+    "kind": {
+      "type": "string",
+      "enum": ["report", "prd", "prompt-pack"],
+      "description": "Which deliverable this file contains"
+    },
+    "title": { "type": "string" },
+    "file_url": { "type": "string", "description": "Base44 file storage URL" },
+    "filename": { "type": "string" },
+    "size_bytes": { "type": "integer" },
+    "summary": { "type": "string", "description": "Short human description of what's inside" }
+  },
+  "required": ["project_id", "kind", "file_url"],
+  "rls": {
+    "create": true,
+    "read": { "created_by": "{{user.email}}" },
+    "update": { "created_by": "{{user.email}}" },
+    "delete": { "created_by": "{{user.email}}" }
+  }
+}

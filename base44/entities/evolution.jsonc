@@ -1,0 +1,19 @@
+{
+  // An original product concept generated from a project's analysis (Evolution Mode).
+  "name": "Evolution",
+  "type": "object",
+  "title": "Evolution Concept",
+  "description": "An original, improved product concept generated from a project's insights.",
+  "properties": {
+    "project_id": { "type": "string" },
+    "title": { "type": "string", "description": "Name of the evolved product concept" },
+    "data": { "type": "object", "description": "Full structured concept payload" }
+  },
+  "required": ["project_id"],
+  "rls": {
+    "create": true,
+    "read": { "created_by": "{{user.email}}" },
+    "update": { "created_by": "{{user.email}}" },
+    "delete": { "created_by": "{{user.email}}" }
+  }
+}

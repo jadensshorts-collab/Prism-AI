@@ -1,0 +1,14 @@
+// Prism AI — AI-powered product intelligence platform.
+// Full-stack Base44 project: entities + backend functions + Vite/React site.
+{
+  "name": "Prism AI",
+
+  "visibility": "public",
+
+  "site": {
+    "buildCommand": "npm run build",
+    "serveCommand": "npm run dev",
+    "outputDirectory": "./dist",
+    "installCommand": "npm install"
+  }
+}

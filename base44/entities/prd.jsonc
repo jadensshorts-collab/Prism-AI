@@ -1,0 +1,23 @@
+{
+  // A generated Product Requirements Document.
+  "name": "Prd",
+  "type": "object",
+  "title": "PRD",
+  "description": "A generated Product Requirements Document for an evolution concept.",
+  "properties": {
+    "project_id": { "type": "string" },
+    "evolution_id": { "type": "string", "description": "Evolution concept this PRD was built from" },
+    "title": { "type": "string" },
+    "content": { "type": "string", "description": "PRD markdown chunk (platform caps field size, so large PRDs span multiple rows)" },
+    "group_id": { "type": "string", "description": "Groups the chunks of one generated PRD" },
+    "part": { "type": "integer", "default": 0, "description": "Chunk order within the group" },
+    "parts_total": { "type": "integer", "default": 1 }
+  },
+  "required": ["project_id", "content"],
+  "rls": {
+    "create": true,
+    "read": { "created_by": "{{user.email}}" },
+    "update": { "created_by": "{{user.email}}" },
+    "delete": { "created_by": "{{user.email}}" }
+  }
+}

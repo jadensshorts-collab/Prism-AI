@@ -1,0 +1,159 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply bg-void text-ink antialiased;
+    color-scheme: dark;
+    scroll-behavior: smooth;
+    /* Anchor targets clear the sticky header instead of hiding beneath it. */
+    scroll-padding-top: 5rem;
+    /* Decorative blur glows are intentionally wider than the viewport;
+       clip at the root so they never create a horizontal scrollbar. */
+    overflow-x: hidden;
+  }
+  body {
+    font-feature-settings: "cv11", "ss01";
+    overflow-x: hidden;
+  }
+  ::selection {
+    background: rgba(139, 92, 246, 0.35);
+  }
+  /* Keyboard users need a visible focus ring; pointer users never see it. */
+  :focus-visible {
+    outline: 2px solid #a78bfa;
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  /* Honour the OS "reduce motion" setting across every animation. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply bg-white/[0.03] border border-edge rounded-2xl;
+  }
+  .glass-hover {
+    @apply transition-colors duration-200 hover:bg-white/[0.05] hover:border-edge-strong;
+  }
+  .spectrum-text {
+    background: linear-gradient(92deg, #a78bfa 0%, #67e8f9 45%, #34d399 75%, #fbbf24 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .spectrum-bar {
+    background: linear-gradient(90deg, #8b5cf6, #60a5fa, #22d3ee, #34d399, #fbbf24, #fb7185);
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold text-white transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+    background: linear-gradient(135deg, #8b5cf6 0%, #6d5cf6 50%, #22d3ee 130%);
+    box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.4), 0 8px 24px -8px rgba(139, 92, 246, 0.5);
+  }
+  .btn-primary:hover:not(:disabled) {
+    box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.7), 0 10px 32px -6px rgba(139, 92, 246, 0.65);
+    transform: translateY(-1px);
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-muted border border-edge bg-white/[0.02] transition-all duration-200 hover:text-ink hover:border-edge-strong hover:bg-white/[0.05] disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .input-dark {
+    @apply w-full rounded-xl border border-edge bg-white/[0.03] px-4 py-2.5 text-sm text-ink placeholder:text-faint outline-none transition-colors duration-200 focus:border-violet/60 focus:bg-white/[0.05];
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium;
+  }
+}
+
+.bg-grid {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+
+.mask-fade-b {
+  -webkit-mask-image: linear-gradient(to bottom, black 55%, transparent 100%);
+  mask-image: linear-gradient(to bottom, black 55%, transparent 100%);
+}
+
+.prose-prism {
+  @apply text-sm leading-relaxed text-ink/90;
+}
+.prose-prism h1 {
+  @apply font-display text-2xl font-bold mt-2 mb-4 text-ink;
+}
+.prose-prism h2 {
+  @apply font-display text-lg font-semibold mt-8 mb-3 text-ink border-b border-edge pb-2;
+}
+.prose-prism h3 {
+  @apply text-[15px] font-semibold mt-5 mb-2 text-ink;
+}
+.prose-prism p {
+  @apply my-2.5 text-muted;
+}
+.prose-prism strong {
+  @apply text-ink font-semibold;
+}
+.prose-prism ul,
+.prose-prism ol {
+  @apply my-2.5 pl-5 space-y-1.5 text-muted;
+}
+.prose-prism ul {
+  @apply list-disc;
+}
+.prose-prism ol {
+  @apply list-decimal;
+}
+.prose-prism li::marker {
+  @apply text-violet-soft;
+}
+.prose-prism code {
+  @apply font-mono text-[12px] bg-white/[0.06] border border-edge rounded px-1.5 py-0.5 text-cyan-soft;
+}
+.prose-prism pre {
+  @apply my-3 p-4 rounded-xl bg-black/40 border border-edge overflow-x-auto;
+}
+.prose-prism pre code {
+  @apply bg-transparent border-0 p-0 text-ink/85;
+}
+.prose-prism table {
+  @apply w-full my-4 text-[13px] border-collapse;
+}
+.prose-prism th {
+  @apply text-left font-semibold text-ink border-b border-edge-strong px-3 py-2;
+}
+.prose-prism td {
+  @apply border-b border-edge px-3 py-2 text-muted align-top;
+}
+.prose-prism blockquote {
+  @apply border-l-2 border-violet/60 pl-4 my-3 text-muted italic;
+}
+.prose-prism a {
+  @apply text-cyan-soft underline underline-offset-2;
+}

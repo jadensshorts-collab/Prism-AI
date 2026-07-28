@@ -1,0 +1,33 @@
+{
+  // A platform-optimized AI builder prompt generated from a PRD.
+  "name": "GeneratedPrompt",
+  "type": "object",
+  "title": "Generated Prompt",
+  "description": "An AI-builder-specific prompt generated from a project's PRD and analysis.",
+  "properties": {
+    "project_id": { "type": "string" },
+    "prd_id": { "type": "string" },
+    "platform": {
+      "type": "string",
+      "enum": [
+        "base44",
+        "claude-code",
+        "cursor",
+        "lovable",
+        "v0",
+        "replit",
+        "windsurf",
+        "codex"
+      ]
+    },
+    "title": { "type": "string" },
+    "content": { "type": "string", "description": "The full prompt text, editable by the user" }
+  },
+  "required": ["project_id", "platform", "content"],
+  "rls": {
+    "create": true,
+    "read": { "created_by": "{{user.email}}" },
+    "update": { "created_by": "{{user.email}}" },
+    "delete": { "created_by": "{{user.email}}" }
+  }
+}
