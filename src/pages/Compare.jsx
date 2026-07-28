@@ -109,15 +109,6 @@ export default function Compare() {
     );
   }
 
-  const winner =
-    left && right && left.innovation_score != null && right.innovation_score != null
-      ? left.innovation_score === right.innovation_score
-        ? null
-        : left.innovation_score > right.innovation_score
-          ? left
-          : right
-      : null;
-
   return (
     <div className="max-w-5xl mx-auto">
       <div className="text-center mb-8">
@@ -136,9 +127,30 @@ export default function Compare() {
         <ProjectSelect projects={projects} value={rightId} onChange={setRightId} exclude={leftId} />
       </div>
 
+      <CompareBody left={left} right={right} facets={facets} />
+    </div>
+  );
+}
+
+// Presentation only, so the head-to-head can be rendered from either live
+// workspace data or the dev fixture harness.
+export function CompareBody({ left, right, facets }) {
+  const winner =
+    left && right && left.innovation_score != null && right.innovation_score != null
+      ? left.innovation_score === right.innovation_score
+        ? null
+        : left.innovation_score > right.innovation_score
+          ? left
+          : right
+      : null;
+
+  if (!left || !right) return null;
+
+  return (
+    <>
       {left && right && (
         <motion.div
-          key={leftId + rightId}
+          key={left.id + right.id}
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
@@ -179,8 +191,8 @@ export default function Compare() {
                 <DuelBar
                   key={f}
                   label={f}
-                  a={facets[leftId]?.[f]}
-                  b={facets[rightId]?.[f]}
+                  a={facets[left.id]?.[f]}
+                  b={facets[right.id]?.[f]}
                 />
               ))}
             </div>
@@ -214,11 +226,11 @@ export default function Compare() {
           </div>
         </motion.div>
       )}
-    </div>
+    </>
   );
 }
 
-function ProjectSelect({ projects, value, onChange, exclude }) {
+export function ProjectSelect({ projects, value, onChange, exclude }) {
   return (
     <select
       value={value}
