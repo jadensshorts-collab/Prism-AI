@@ -209,11 +209,20 @@ export default function ReportView({ project, sections, onRefresh, initialTab })
 // Renders a layer section, or its running/failed states with a real retry.
 function SectionGate({ project, section, sectionKey, onRefresh }) {
   const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState("");
 
   const retry = async () => {
     setRetrying(true);
+    setRetryError("");
     try {
-      await invokeFunction("retry-section", { projectId: project.id, sectionKey });
+      const res = await invokeFunction("retry-section", { projectId: project.id, sectionKey });
+      if (res?.data?.error) throw new Error(res.data.error);
+    } catch (e) {
+      // Without this the button just spins and resets, leaving the user unsure
+      // whether anything happened.
+      setRetryError(
+        e?.response?.data?.error || e?.message || "That layer didn't come back. Try again in a moment.",
+      );
     } finally {
       setRetrying(false);
       onRefresh();
@@ -235,6 +244,9 @@ function SectionGate({ project, section, sectionKey, onRefresh }) {
           {retrying ? <Spinner size={15} className="text-white" /> : <RotateCcw size={15} />}
           {retrying ? "Re-analyzing…" : "Run this layer"}
         </button>
+        {retryError && (
+          <p className="text-[12px] text-rose mt-4 leading-relaxed">{retryError}</p>
+        )}
       </div>
     );
   }
