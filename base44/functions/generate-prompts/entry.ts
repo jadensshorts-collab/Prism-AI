@@ -334,15 +334,45 @@ ${prdBrief}`,
     // per-minute budget. Compiling in small waves keeps every call inside its
     // window and still finishes in seconds.
     const WAVE = 2;
-    const results: PromiseSettledResult<string>[] = [];
-    for (let i = 0; i < platforms.length; i += WAVE) {
-      const batch = platforms.slice(i, i + WAVE);
-      results.push(...(await Promise.allSettled(batch.map(compileOne))));
-      if (i + WAVE < platforms.length) await sleep(3000);
+    const runWaves = async (list: string[]) => {
+      const failedNow: string[] = [];
+      for (let i = 0; i < list.length; i += WAVE) {
+        const batch = list.slice(i, i + WAVE);
+        const settled = await Promise.allSettled(batch.map(compileOne));
+        settled.forEach((r, idx) => {
+          if (r.status === "rejected") failedNow.push(batch[idx]);
+        });
+        if (i + WAVE < list.length) await sleep(3000);
+      }
+      return failedNow;
+    };
+
+    let outstanding = await runWaves(platforms);
+
+    // A platform that lost its slot to a saturated rate window gets a second
+    // chance one at a time, after the window has had room to refill. Without
+    // this a single unlucky call leaves the pack permanently short.
+    if (outstanding.length) {
+      await sleep(12000);
+      const retryFailed: string[] = [];
+      for (const platform of outstanding) {
+        try {
+          await compileOne(platform);
+        } catch {
+          retryFailed.push(platform);
+        }
+        await sleep(2500);
+      }
+      outstanding = retryFailed;
     }
 
-    const failed = results.filter((r) => r.status === "rejected").length;
-    return Response.json({ ok: true, generated: platforms.length - failed, failed, recommendation });
+    return Response.json({
+      ok: true,
+      generated: platforms.length - outstanding.length,
+      failed: outstanding.length,
+      failedPlatforms: outstanding,
+      recommendation,
+    });
   } catch (err) {
     return Response.json({ error: String(err?.message || err) }, { status: 500 });
   }
