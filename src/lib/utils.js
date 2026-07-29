@@ -3,7 +3,8 @@ export function cn(...classes) {
 }
 
 export function scoreColor(score) {
-  if (score == null) return "#62626F";
+  // Matches the `faint` token; kept at AA contrast on the page background.
+  if (score == null) return "#7C7C88";
   if (score >= 80) return "#34D399";
   if (score >= 65) return "#22D3EE";
   if (score >= 50) return "#FBBF24";

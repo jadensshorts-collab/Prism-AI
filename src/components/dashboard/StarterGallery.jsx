@@ -25,7 +25,10 @@ export default function StarterGallery({ onPick, busy, pending }) {
               style={{ background: p.color }}
             />
             <div className="relative flex items-start gap-3.5">
+              {/* Decorative brand initial — the product name sits beside it, so
+                  it is hidden from assistive tech rather than read twice. */}
               <div
+                aria-hidden="true"
                 className="w-10 h-10 rounded-xl flex items-center justify-center font-display text-lg font-bold shrink-0"
                 style={{
                   background: `${p.color}1F`,

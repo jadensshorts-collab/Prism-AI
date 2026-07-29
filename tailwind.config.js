@@ -9,9 +9,12 @@ export default {
         raised: "#12121C",
         edge: "rgba(255,255,255,0.08)",
         "edge-strong": "rgba(255,255,255,0.14)",
+        // Tertiary text sat at 3.35:1 on the page background — below the 4.5:1
+        // WCAG AA minimum for body copy. Lifted to ~4.6:1 while staying clearly
+        // quieter than `muted` (6.9:1), so the hierarchy still reads.
         ink: "#EDEDF2",
         muted: "#9B9BAD",
-        faint: "#62626F",
+        faint: "#7C7C88",
         violet: { DEFAULT: "#8B5CF6", soft: "#A78BFA" },
         cyan: { DEFAULT: "#22D3EE", soft: "#67E8F9" },
         emerald: { DEFAULT: "#34D399" },

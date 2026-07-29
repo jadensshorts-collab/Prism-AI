@@ -150,7 +150,7 @@ export function OverviewSection({ project, sections, onNavigate }) {
                 <l.icon size={16} className="mx-auto mb-2" style={{ color: l.color }} />
                 <div
                   className="font-display text-lg font-bold tabular-nums"
-                  style={{ color: score != null ? scoreColor(score) : "#62626F" }}
+                  style={{ color: scoreColor(score) }}
                 >
                   {score != null ? Math.round(score) : sec?.status === "failed" ? "!" : "—"}
                 </div>
