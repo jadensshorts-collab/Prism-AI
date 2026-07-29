@@ -331,7 +331,12 @@ export default function Landing() {
               transition={{ ...fadeUp.transition, delay: i * 0.08 }}
               className="glass p-6 relative overflow-hidden"
             >
-              <span className="absolute -top-3 right-3 font-display text-6xl font-bold text-white/[0.04]">
+              {/* Watermark numeral — deliberately at the edge of visibility, so
+                  it is decoration rather than content. */}
+              <span
+                aria-hidden="true"
+                className="absolute -top-3 right-3 font-display text-6xl font-bold text-white/[0.04]"
+              >
                 {s.n}
               </span>
               <s.icon size={20} className="text-violet-soft mb-4" />
@@ -391,7 +396,9 @@ export default function Landing() {
                 {
                   t: "Automated Retro-Insights",
                   c: "AI Opportunity",
-                  color: "#8B5CF6",
+                  // The soft violet, not the base one: at chip size the base
+                  // #8B5CF6 reads at 4.05:1, under the AA minimum.
+                  color: "#A78BFA",
                   d: "Read completed cycles to find recurring velocity bottlenecks.",
                 },
                 {
@@ -457,7 +464,7 @@ export default function Landing() {
                     className="flex items-center justify-between rounded-xl border border-edge bg-white/[0.02] px-4 py-2.5"
                   >
                     <span className="text-sm font-medium">{p}</span>
-                    <span className="text-[11px] text-faint font-mono">
+                    <span className="text-[11px] text-muted font-mono">
                       {i === 0 ? "recommended" : "native prompt"}
                     </span>
                   </motion.div>

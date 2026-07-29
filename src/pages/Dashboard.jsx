@@ -214,8 +214,10 @@ export default function Dashboard() {
         </section>
       )}
 
-      {/* Projects — only once the workspace has something in it */}
-      <section className={projects?.length ? "" : "hidden"}>
+      {/* Projects — only once the workspace has something in it. Kept mounted
+          while the list is still loading so the spinner below has somewhere to
+          render; an empty workspace hides it and leads with the gallery. */}
+      <section className={projects == null || projects.length ? "" : "hidden"}>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
           <h2 className="font-display text-xl font-semibold">Your analyses</h2>
           <div className="flex items-center gap-2.5">
@@ -266,6 +268,19 @@ export default function Dashboard() {
                   exit={{ opacity: 0, scale: 0.97 }}
                   transition={{ duration: 0.4, delay: Math.min(i * 0.04, 0.3) }}
                   onClick={() => navigate(`/app/project/${p.id}`)}
+                  // The whole card is the click target, so it has to be a real
+                  // stop for keyboard users too — otherwise the only way into a
+                  // report is a mouse.
+                  role="link"
+                  tabIndex={0}
+                  aria-label={`Open the ${p.product_name || hostnameOf(p.input_url)} report`}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      navigate(`/app/project/${p.id}`);
+                    }
+                  }}
                   className="glass glass-hover p-5 cursor-pointer group relative"
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -273,7 +288,11 @@ export default function Dashboard() {
                       <h3 className="font-semibold text-[15px] truncate">
                         {p.product_name || hostnameOf(p.input_url)}
                       </h3>
-                      <p className="text-xs text-faint truncate mt-0.5">{hostnameOf(p.input_url)}</p>
+                      {/* Until the pipeline names the product the heading is
+                          already the hostname — don't print it twice. */}
+                      {p.product_name && (
+                        <p className="text-xs text-faint truncate mt-0.5">{hostnameOf(p.input_url)}</p>
+                      )}
                     </div>
                     {p.status === "complete" ? (
                       <ScoreRing score={p.innovation_score} size={46} strokeWidth={4} />
@@ -320,8 +339,18 @@ export default function Dashboard() {
                   )}
 
                   <div className="flex items-center justify-between mt-4 pt-3.5 border-t border-edge">
-                    <span className="text-[11px] text-faint">{timeAgo(p.created_date)}</span>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {/* The favourite marker lives beside the timestamp rather
+                        than in the card corner, which the score ring occupies. */}
+                    <span className="text-[11px] text-faint flex items-center gap-1.5">
+                      {p.is_favorite && (
+                        <Star size={12} className="fill-amber text-amber" aria-label="Favorite" />
+                      )}
+                      {timeAgo(p.created_date)}
+                    </span>
+                    {/* Revealed on hover, but hover is not universal: keyboard
+                        users need it on focus, and touch devices never hover at
+                        all — without these the actions are unreachable there. */}
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
                       <button
                         onClick={(e) => toggleFavorite(p, e)}
                         aria-label={p.is_favorite ? "Remove from favorites" : "Add to favorites"}
@@ -340,9 +369,6 @@ export default function Dashboard() {
                       </button>
                       <ArrowRight size={14} className="text-faint ml-1" />
                     </div>
-                    {p.is_favorite && (
-                      <Star size={14} className="fill-amber text-amber absolute top-4 right-4 group-hover:opacity-0 transition-opacity" />
-                    )}
                   </div>
                 </motion.div>
               ))}

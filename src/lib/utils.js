@@ -3,8 +3,10 @@ export function cn(...classes) {
 }
 
 export function scoreColor(score) {
-  // Matches the `faint` token; kept at AA contrast on the page background.
-  if (score == null) return "#7C7C88";
+  // Matches the `muted` token. `faint` clears AA on the page background but not
+  // inside a card nested in a card, which is where the "no score yet" dash
+  // actually appears.
+  if (score == null) return "#9B9BAD";
   if (score >= 80) return "#34D399";
   if (score >= 65) return "#22D3EE";
   if (score >= 50) return "#FBBF24";

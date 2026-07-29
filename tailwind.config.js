@@ -15,6 +15,11 @@ export default {
         ink: "#EDEDF2",
         muted: "#9B9BAD",
         faint: "#7C7C88",
+        // `faint` clears AA on the page background but drops to 4.27:1 inside an
+        // input, whose own fill lightens what sits behind the text. Placeholders
+        // get their own slightly brighter value so they stay legible focused or
+        // not, without reading as an already-filled value.
+        hint: "#8A8A99",
         violet: { DEFAULT: "#8B5CF6", soft: "#A78BFA" },
         cyan: { DEFAULT: "#22D3EE", soft: "#67E8F9" },
         emerald: { DEFAULT: "#34D399" },

@@ -154,7 +154,7 @@ export function OverviewSection({ project, sections, onNavigate }) {
                 >
                   {score != null ? Math.round(score) : sec?.status === "failed" ? "!" : "—"}
                 </div>
-                <div className="text-[10px] text-faint mt-0.5 flex items-center justify-center gap-0.5">
+                <div className="text-[10px] text-muted mt-0.5 flex items-center justify-center gap-0.5">
                   {l.label}
                   <ArrowUpRight size={9} className="opacity-0 group-hover:opacity-100 transition-opacity" />
                 </div>
@@ -507,11 +507,13 @@ export function CompetitorsSection({ data: d }) {
 const OPP_COLORS = {
   "Missing Feature": "#60A5FA",
   "Better Workflow": "#22D3EE",
-  "AI Opportunity": "#8B5CF6",
+  // The base violet reads at 4.23:1 as chip-sized text — the soft one clears AA.
+  // Accessibility moves a shade lighter so the two stay distinguishable.
+  "AI Opportunity": "#A78BFA",
   "New Audience": "#34D399",
   Automation: "#67E8F9",
   Monetization: "#FBBF24",
-  Accessibility: "#A78BFA",
+  Accessibility: "#C4B5FD",
   Enterprise: "#FB7185",
 };
 

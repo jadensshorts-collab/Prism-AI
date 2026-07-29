@@ -54,7 +54,7 @@ export default function StarterGallery({ onPick, busy, pending }) {
               </div>
             </div>
             <p className="relative text-[13px] text-muted leading-relaxed mt-3.5">{p.question}</p>
-            <span className="relative chip border-edge text-faint bg-white/[0.02] mt-3.5">
+            <span className="relative chip border-edge text-muted bg-white/[0.02] mt-3.5">
               {p.category}
             </span>
           </motion.button>

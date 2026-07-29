@@ -291,7 +291,7 @@ function EvolutionStep({ project, evolution, working, onGenerate, onNext }) {
           {d.inspired_by_gaps?.length > 0 && (
             <div className="flex flex-wrap gap-2 mt-5">
               {d.inspired_by_gaps.map((g, i) => (
-                <span key={i} className="chip border-edge text-faint bg-white/[0.02]">exploits: {g}</span>
+                <span key={i} className="chip border-edge text-muted bg-white/[0.02]">exploits: {g}</span>
               ))}
             </div>
           )}
