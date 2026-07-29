@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Share2, Check, Copy, Globe, Lock, X } from "lucide-react";
 import { invokeFunction, track } from "@/api/base44Client";
@@ -21,6 +21,8 @@ export default function ShareButton({ project, onChange }) {
     ? `${window.location.origin}/r/${state.share_token}`
     : "";
 
+  const triggerRef = useRef(null);
+
   // Escape should dismiss the popover, matching every other menu on the web.
   useEffect(() => {
     if (!open) return;
@@ -29,6 +31,15 @@ export default function ShareButton({ project, onChange }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  // Closing the panel unmounts whatever had focus, which drops the caret back
+  // to the document and restarts tabbing from the top of the page. Hand focus
+  // back to the button that opened it.
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (wasOpen.current && !open) triggerRef.current?.focus();
+    wasOpen.current = open;
   }, [open]);
 
   const toggle = async (share) => {
@@ -58,6 +69,7 @@ export default function ShareButton({ project, onChange }) {
   return (
     <div className="relative">
       <button
+        ref={triggerRef}
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="dialog"
@@ -73,6 +85,8 @@ export default function ShareButton({ project, onChange }) {
           <>
             <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
             <motion.div
+              role="dialog"
+              aria-label="Report sharing"
               initial={{ opacity: 0, y: -6, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -6, scale: 0.98 }}
@@ -93,7 +107,9 @@ export default function ShareButton({ project, onChange }) {
                 <button
                   onClick={() => setOpen(false)}
                   aria-label="Close sharing panel"
-                  className="text-faint hover:text-ink"
+                  // Padding here is the target, not decoration: a bare 14px
+                  // icon is under the 24px WCAG 2.2 minimum.
+                  className="text-faint hover:text-ink p-1.5 -m-1.5 rounded-lg"
                 >
                   <X size={14} />
                 </button>

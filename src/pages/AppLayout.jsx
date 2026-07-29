@@ -76,8 +76,11 @@ export default function AppLayout() {
               </span>
               <button
                 onClick={signOut}
+                aria-label="Sign out"
                 title="Sign out"
-                className="text-faint hover:text-rose transition-colors p-1"
+                // p-1 around a 15px icon leaves a 23px target, just under the
+                // 24px WCAG 2.2 minimum.
+                className="text-faint hover:text-rose transition-colors p-1.5 rounded-lg hover:bg-white/[0.06]"
               >
                 <LogOut size={15} />
               </button>

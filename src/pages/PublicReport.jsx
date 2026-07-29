@@ -154,7 +154,10 @@ export function PublicReportView({ project, sections }) {
                 href={productUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="text-[12px] text-faint hover:text-cyan-soft transition-colors flex items-center gap-1"
+                // Standing on its own rather than inside a sentence, so it owes
+                // the 24px minimum target; the negative margin keeps the row's
+                // spacing as it was.
+                className="text-[12px] text-faint hover:text-cyan-soft transition-colors flex items-center gap-1 py-1.5 -my-1.5"
               >
                 <ExternalLink size={11} />
                 {hostnameOf(project.input_url)}
