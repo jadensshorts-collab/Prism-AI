@@ -20,6 +20,7 @@ export const Evolution = base44.entities.Evolution;
 export const Prd = base44.entities.Prd;
 export const GeneratedPrompt = base44.entities.GeneratedPrompt;
 export const Artifact = base44.entities.Artifact;
+export const UserProfile = base44.entities.UserProfile;
 
 export const invokeFunction = (name, params) => base44.functions.invoke(name, params);
 

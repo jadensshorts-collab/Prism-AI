@@ -1,0 +1,22 @@
+{
+  // Per-user presentation settings. Kept separate from the built-in User
+  // entity, whose name and email are read-only, so nothing here can disturb
+  // the account record itself. One row per user, scoped by row-level security.
+  "name": "UserProfile",
+  "type": "object",
+  "title": "UserProfile",
+  "description": "A user's own display preferences for the workspace.",
+  "properties": {
+    "avatar": {
+      "type": "string",
+      "description": "Either a `preset:<id>` reference to a built-in gradient, or a downscaled square JPEG data URI. File storage is unavailable on this plan, so the image is inlined — the client caps it well under the entity field limit."
+    }
+  },
+  "required": [],
+  "rls": {
+    "create": true,
+    "read": { "created_by": "{{user.email}}" },
+    "update": { "created_by": "{{user.email}}" },
+    "delete": { "created_by": "{{user.email}}" }
+  }
+}

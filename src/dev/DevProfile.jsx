@@ -13,6 +13,25 @@ const user = {
   role: "admin",
 };
 
+// Stands in for the UserProfile entity so the picker's full save path runs
+// without a session. `window.__devProfileRows` lets a check inspect what was
+// actually written, and `window.__devProfileFail` forces the failure branch.
+window.__devProfileRows = [];
+const profileStore = {
+  read: async () => window.__devProfileRows,
+  create: async (data) => {
+    if (window.__devProfileFail) throw new Error("Storage is unavailable.");
+    const created = { id: "dev-profile-1", ...data };
+    window.__devProfileRows = [created];
+    return created;
+  },
+  update: async (id, data) => {
+    if (window.__devProfileFail) throw new Error("Storage is unavailable.");
+    window.__devProfileRows = [{ id, ...data }];
+    return window.__devProfileRows[0];
+  },
+};
+
 export default function DevProfile() {
   return (
     <div className="min-h-screen bg-void">
@@ -42,7 +61,11 @@ export default function DevProfile() {
             </nav>
           </div>
           <div className="shrink-0">
-            <ProfileMenu user={user} fetchProjects={() => Promise.resolve(fixture.projects)} />
+            <ProfileMenu
+              user={user}
+              fetchProjects={() => Promise.resolve(fixture.projects)}
+              profileStore={profileStore}
+            />
           </div>
         </div>
       </header>
