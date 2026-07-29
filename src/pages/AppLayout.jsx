@@ -1,9 +1,10 @@
 import { useEffect } from "react";
 import { Outlet, Link, useLocation } from "react-router-dom";
-import { LayoutGrid, GitCompareArrows, LogOut } from "lucide-react";
+import { LayoutGrid, GitCompareArrows } from "lucide-react";
 import PrismMark from "@/components/PrismMark";
+import ProfileMenu from "@/components/ProfileMenu";
 import Spinner from "@/components/ui/Spinner";
-import { useAuth, signIn, signOut } from "@/lib/useAuth";
+import { useAuth, signIn } from "@/lib/useAuth";
 import { cn } from "@/lib/utils";
 
 export default function AppLayout() {
@@ -35,13 +36,20 @@ export default function AppLayout() {
     <div className="min-h-screen bg-void">
       <header className="sticky top-0 z-40 border-b border-edge bg-void/80 backdrop-blur-xl">
         <div className="max-w-7xl mx-auto px-5 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-7">
+          {/* Left group has to be allowed to shrink: at 375px the brand plus two
+              labelled nav items measured 322px, which pushed the avatar past the
+              right edge of the screen. */}
+          <div className="flex items-center gap-4 sm:gap-7 min-w-0">
             {/* The brand mark is the way back out to the marketing homepage. */}
-            <Link to="/" className="flex items-center gap-2.5" title="Back to the Prism AI homepage">
+            <Link
+              to="/"
+              className="flex items-center gap-2.5 shrink-0"
+              title="Back to the Prism AI homepage"
+            >
               <PrismMark size={24} />
               <span className="font-display font-semibold tracking-tight">Prism AI</span>
             </Link>
-            <nav className="flex items-center gap-1">
+            <nav className="flex items-center gap-1 min-w-0">
               {nav.map((n) => {
                 const active = n.exact
                   ? location.pathname === n.to
@@ -50,41 +58,27 @@ export default function AppLayout() {
                   <Link
                     key={n.to}
                     to={n.to}
+                    aria-label={n.label}
                     className={cn(
-                      "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors",
+                      "flex items-center gap-1.5 rounded-lg px-2.5 sm:px-3 py-1.5 text-[13px] font-medium transition-colors",
                       active
                         ? "text-ink bg-white/[0.07]"
                         : "text-muted hover:text-ink hover:bg-white/[0.04]",
                     )}
                   >
                     <n.icon size={14} />
-                    {n.label}
+                    {/* Labels fold away on the narrowest screens; the icons and
+                        the aria-label carry the meaning. */}
+                    <span className="hidden sm:inline">{n.label}</span>
                   </Link>
                 );
               })}
             </nav>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-full spectrum-bar p-[1.5px]">
-                <div className="w-full h-full rounded-full bg-raised flex items-center justify-center text-[11px] font-semibold">
-                  {(user.full_name || user.email || "?")[0].toUpperCase()}
-                </div>
-              </div>
-              <span className="text-[13px] text-muted hidden md:block max-w-[140px] truncate">
-                {user.full_name || user.email}
-              </span>
-              <button
-                onClick={signOut}
-                aria-label="Sign out"
-                title="Sign out"
-                // p-1 around a 15px icon leaves a 23px target, just under the
-                // 24px WCAG 2.2 minimum.
-                className="text-faint hover:text-rose transition-colors p-1.5 rounded-lg hover:bg-white/[0.06]"
-              >
-                <LogOut size={15} />
-              </button>
-            </div>
+          {/* The avatar opens the account panel, which is where signing out
+              now lives — the header keeps one control instead of three. */}
+          <div className="shrink-0">
+            <ProfileMenu user={user} />
           </div>
         </div>
       </header>
