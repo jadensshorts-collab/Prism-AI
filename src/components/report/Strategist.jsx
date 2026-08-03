@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Send, Sparkles, Wrench, Zap } from "lucide-react";
 import { base44, Project, ChatMessage, invokeFunction } from "@/api/base44Client";
-import Markdown from "@/components/ui/Markdown";
+import TypedMarkdown from "@/components/ui/TypedMarkdown";
 import Spinner from "@/components/ui/Spinner";
 import PrismMark from "@/components/PrismMark";
 
@@ -39,6 +39,11 @@ export default function Strategist({ project }) {
   const convoRef = useRef(null);
   const agentSucceeded = useRef(false);
   const endRef = useRef(null);
+  const scrollRef = useRef(null);
+  // Only an answer that just arrived gets typed out. Reloading the tab would
+  // otherwise replay the whole transcript, which reads as the app re-thinking
+  // things it already said.
+  const [typingId, setTypingId] = useState(null);
 
   // Normalizes both transports into one shape the view can render.
   const toView = (list) =>
@@ -52,22 +57,32 @@ export default function Strategist({ project }) {
       }))
       .filter((m) => m.content || m.tools.length);
 
-  const loadAgentConversation = async () => {
+  // `typeNewest` marks the freshest assistant message for the reveal. It stays
+  // off for history loads and for error recovery, where nothing is new.
+  const commit = (list, typeNewest = false) => {
+    setMessages(list);
+    if (!typeNewest) return;
+    const newest = [...list].reverse().find((m) => m.role === "assistant");
+    if (newest) setTypingId(newest.id);
+  };
+
+  const loadAgentConversation = async (typeNewest = false) => {
     // Reuse the conversation bound to this project so context compounds.
     if (project.agent_conversation_id) {
       const convo = await base44.agents.getConversation(project.agent_conversation_id);
       convoRef.current = convo;
-      setMessages(toView(convo?.messages || []));
+      commit(toView(convo?.messages || []), typeNewest);
       return true;
     }
     setMessages([]);
     return true;
   };
 
-  const loadFallback = async () => {
+  const loadFallback = async (typeNewest = false) => {
     const rows = await ChatMessage.filter({ project_id: project.id }, "created_date", 200);
-    setMessages(
+    commit(
       rows.map((m) => ({ id: m.id, role: m.role, content: m.content, tools: [] })),
+      typeNewest,
     );
   };
 
@@ -93,6 +108,16 @@ export default function Strategist({ project }) {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, thinking, activeTools]);
 
+  // Called on every reveal tick. Smooth scrolling can't keep up at that rate,
+  // so this jumps — and it stands down entirely if the reader has scrolled up,
+  // rather than dragging them back to the bottom mid-sentence.
+  const stickToBottom = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight > 120) return;
+    el.scrollTop = el.scrollHeight;
+  };
+
   const ask = async (text) => {
     const message = (text ?? input).trim();
     if (!message || thinking) return;
@@ -100,6 +125,9 @@ export default function Strategist({ project }) {
     setError("");
     setThinking(true);
     setActiveTools([]);
+    // Asking again finishes whatever is still being revealed, so the previous
+    // answer is never left half-written above the new question.
+    setTypingId(null);
     setMessages((prev) => [
       ...(prev || []),
       { id: `tmp-${Date.now()}`, role: "user", content: message, tools: [] },
@@ -140,7 +168,7 @@ export default function Strategist({ project }) {
         convoRef.current = full;
         agentSucceeded.current = true;
         setAgentActive(true);
-        setMessages(toView(full?.messages || []));
+        commit(toView(full?.messages || []), true);
       } finally {
         try {
           unsub?.();
@@ -168,7 +196,7 @@ export default function Strategist({ project }) {
             message,
           });
           if (res?.data?.error) throw new Error(res.data.error);
-          await loadFallback();
+          await loadFallback(true);
         } catch (e) {
           setError(
             e?.response?.data?.error || e?.message || "The strategist couldn't answer. Try again.",
@@ -202,7 +230,7 @@ export default function Strategist({ project }) {
           )}
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 space-y-5">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-5">
           {messages == null ? (
             <div className="flex items-center justify-center h-full gap-2.5 text-muted text-sm">
               <Spinner /> Loading conversation…
@@ -257,7 +285,11 @@ export default function Strategist({ project }) {
                           ))}
                         </div>
                       )}
-                      <Markdown>{m.content}</Markdown>
+                      <TypedMarkdown
+                        text={m.content}
+                        animate={m.id === typingId}
+                        onAdvance={stickToBottom}
+                      />
                     </div>
                   )}
                 </motion.div>

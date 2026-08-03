@@ -157,3 +157,33 @@
 .prose-prism a {
   @apply text-cyan-soft underline underline-offset-2;
 }
+
+/* A caret rides the end of an answer while it is being revealed. It hangs off
+   the last block so it follows the text through paragraphs and list items. */
+.prose-prism.is-typing > *:last-child::after {
+  content: "";
+  display: inline-block;
+  vertical-align: text-bottom;
+  width: 0.45em;
+  height: 1.05em;
+  margin-left: 0.12em;
+  border-radius: 1px;
+  background: theme("colors.violet.soft");
+  animation: caret-blink 1s steps(2, start) infinite;
+}
+
+@keyframes caret-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.15;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prose-prism.is-typing > *:last-child::after {
+    animation: none;
+  }
+}
