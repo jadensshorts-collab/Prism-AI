@@ -23,24 +23,45 @@ const MODELS = [
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// Reasoning-tuned models return their scratchpad alongside (or instead of) the
+// answer. Groq withholds it when asked, and `looksLikeReasoning` catches the
+// ones that ignore the flag before their notes reach a stored prompt.
+const REASONING_MODELS = new Set([
+  "qwen/qwen3.6-27b",
+  "openai/gpt-oss-120b",
+  "openai/gpt-oss-20b",
+]);
+
 async function groqChat(prompt: string, model: string, maxTokens: number, json: boolean) {
   const key = Deno.env.get("GROQ_API_KEY");
   if (!key) throw new Error("GROQ_API_KEY is not configured");
-  const body: Record<string, unknown> = {
-    model,
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0.7,
-    max_completion_tokens: maxTokens,
-  };
-  if (json) body.response_format = { type: "json_object" };
-  const res = await fetch(GROQ_URL, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
+  let hideReasoning = REASONING_MODELS.has(model);
+  for (let attempt = 0; ; attempt++) {
+    const body: Record<string, unknown> = {
+      model,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.7,
+      max_completion_tokens: maxTokens,
+    };
+    if (json) body.response_format = { type: "json_object" };
+    if (hideReasoning) body.reasoning_format = "hidden";
+    const res = await fetch(GROQ_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return stripReasoning((data?.choices?.[0]?.message?.content ?? "") as string);
+    }
     const e = await res.json().catch(() => ({}));
-    const err = new Error(e?.error?.message || `Groq HTTP ${res.status}`) as Error & { rateLimited?: boolean };
+    const msg = e?.error?.message || `Groq HTTP ${res.status}`;
+    // A model that doesn't accept the flag shouldn't lose its turn over it.
+    if (hideReasoning && attempt === 0 && res.status === 400) {
+      hideReasoning = false;
+      continue;
+    }
+    const err = new Error(msg) as Error & { rateLimited?: boolean };
     err.rateLimited = res.status === 429;
     // Token budgets refill on a rolling minute, so respect the server's hint
     // instead of guessing at a delay.
@@ -48,8 +69,6 @@ async function groqChat(prompt: string, model: string, maxTokens: number, json: 
     if (Number.isFinite(ra) && ra > 0) (err as { retryAfterMs?: number }).retryAfterMs = Math.min(ra * 1000, 8000);
     throw err;
   }
-  const data = await res.json();
-  return stripReasoning((data?.choices?.[0]?.message?.content ?? "") as string);
 }
 
 // Some models emit chain-of-thought in <think> blocks. None of that belongs
@@ -58,6 +77,23 @@ function stripReasoning(text: string): string {
   const THINK_BLOCK = new RegExp('<think>[\\s\\S]*?</think>', 'gi');
   const THINK_TAG = new RegExp('</?think>', 'gi');
   return text.replace(THINK_BLOCK, '').replace(THINK_TAG, '').trim();
+}
+
+// The untagged form is the dangerous one: a model narrates the work instead of
+// doing it and returns a plan — "Thinking Process:", a numbered deconstruction,
+// notes about drafting. Nothing strips that, because it isn't marked as
+// anything; it has to be recognised by shape and the turn handed to another model.
+function looksLikeReasoning(text: string): boolean {
+  const head = text.slice(0, 700);
+  return (
+    /^\s*(?:#{1,6}\s*)?(?:\*\*|__)?\s*(?:thinking|thought|reasoning|analysis|planning)(?:\s+process|\s+steps?)?(?:\*\*|__)?\s*:/i.test(
+      head,
+    ) ||
+    /\b(?:mental draft|rough text assembly|drafting the prompt|deconstruct the prd|map to \w+ structure)\b/i.test(
+      head,
+    ) ||
+    /^\s*(?:okay|alright)[,!]?\s+(?:so\b|let(?:'s| me)\b|i\b)/i.test(head)
+  );
 }
 
 function extractJson(text: string): Record<string, any> {
@@ -122,7 +158,9 @@ async function groqText(prompt: string, maxTokens = 2600, model?: string): Promi
       if (Date.now() > deadline) break;
       try {
         const out = await groqChat(prompt, m, maxTokens, false);
-        if (out && out.trim()) return out;
+        // A leaked scratchpad is worse than no answer — it would be stored and
+        // shown as if it were the prompt. Treat it as a miss and move on.
+        if (out && out.trim() && !looksLikeReasoning(out)) return out;
       } catch (err) {
         lastErr = err;
         const e429 = err as { rateLimited?: boolean; retryAfterMs?: number };
@@ -289,9 +327,12 @@ ${prdText}`,
       "claude-code": "openai/gpt-oss-120b",
       cursor: "openai/gpt-oss-20b",
       lovable: "llama-3.3-70b-versatile",
-      v0: "qwen/qwen3.6-27b",
+      // v0 previously led with the reasoning model and shipped its planning
+      // notes as the prompt. The guard above would now catch that, but there is
+      // no reason to spend the first attempt on the model most likely to trip it.
+      v0: "openai/gpt-oss-120b",
       replit: "openai/gpt-oss-20b",
-      windsurf: "openai/gpt-oss-120b",
+      windsurf: "qwen/qwen3.6-27b",
       codex: "llama-3.3-70b-versatile",
     };
     const prdBrief = prdContent.slice(0, 3500);

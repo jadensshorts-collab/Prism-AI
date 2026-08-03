@@ -395,26 +395,45 @@ const SECTION_MODEL: Record<string, string> = {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// Reasoning-tuned models return their scratchpad alongside (or instead of) the
+// answer. Groq withholds it when asked, and `looksLikeReasoning` catches the
+// ones that ignore the flag before their notes reach user-facing output.
+const REASONING_MODELS = new Set([
+  "qwen/qwen3.6-27b",
+  "openai/gpt-oss-120b",
+  "openai/gpt-oss-20b",
+]);
+
 async function groqChat(prompt: string, model: string, maxTokens: number, json: boolean) {
   const key = Deno.env.get("GROQ_API_KEY");
   if (!key) throw new Error("GROQ_API_KEY is not configured");
-  const body: Record<string, unknown> = {
-    model,
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0.7,
-    max_completion_tokens: maxTokens,
-  };
-  if (json) body.response_format = { type: "json_object" };
-  const res = await fetch(GROQ_URL, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const e = await res.json().catch(() => ({}));
-    const err = new Error(e?.error?.message || `Groq HTTP ${res.status}`) as Error & {
-      rateLimited?: boolean;
+  let hideReasoning = REASONING_MODELS.has(model);
+  for (let attempt = 0; ; attempt++) {
+    const body: Record<string, unknown> = {
+      model,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.7,
+      max_completion_tokens: maxTokens,
     };
+    if (json) body.response_format = { type: "json_object" };
+    if (hideReasoning) body.reasoning_format = "hidden";
+    const res = await fetch(GROQ_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return stripReasoning((data?.choices?.[0]?.message?.content ?? "") as string);
+    }
+    const e = await res.json().catch(() => ({}));
+    const msg = e?.error?.message || `Groq HTTP ${res.status}`;
+    // A model that doesn't accept the flag shouldn't lose its turn over it.
+    if (hideReasoning && attempt === 0 && res.status === 400) {
+      hideReasoning = false;
+      continue;
+    }
+    const err = new Error(msg) as Error & { rateLimited?: boolean };
     err.rateLimited = res.status === 429;
     // Token budgets refill on a rolling minute, so respect the server's hint
     // instead of guessing at a delay.
@@ -422,8 +441,6 @@ async function groqChat(prompt: string, model: string, maxTokens: number, json: 
     if (Number.isFinite(ra) && ra > 0) (err as { retryAfterMs?: number }).retryAfterMs = Math.min(ra * 1000, 8000);
     throw err;
   }
-  const data = await res.json();
-  return stripReasoning((data?.choices?.[0]?.message?.content ?? "") as string);
 }
 
 // Some models emit chain-of-thought in <think> blocks. None of that belongs
@@ -433,6 +450,10 @@ function stripReasoning(text: string): string {
   const THINK_TAG = new RegExp('</?think>', 'gi');
   return text.replace(THINK_BLOCK, '').replace(THINK_TAG, '').trim();
 }
+
+// No plain-text guard here: every call in this file asks for JSON and goes
+// through extractJson, which already rejects a response that isn't an object.
+// Hiding the reasoning at the API is what matters for the analysis passes.
 
 // Pulls the first balanced JSON object out of a response, tolerating fences or
 // stray prose some models emit despite json_object mode.

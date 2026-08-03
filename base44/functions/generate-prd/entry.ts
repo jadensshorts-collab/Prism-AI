@@ -1,4 +1,4 @@
-﻿// Prism AI â€” PRD Generator. Produces a complete, build-ready Product
+// Prism AI Ã¢â‚¬â€ PRD Generator. Produces a complete, build-ready Product
 // Requirements Document from an Evolution concept. Generated in two focused
 // passes (product + engineering) for depth, then stitched into one document.
 import { createClientFromRequest } from "npm:@base44/sdk";
@@ -23,24 +23,45 @@ const MODELS = [
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// Reasoning-tuned models return their scratchpad alongside (or instead of) the
+// answer. Groq withholds it when asked, and `looksLikeReasoning` catches the
+// ones that ignore the flag before their notes reach user-facing output.
+const REASONING_MODELS = new Set([
+  "qwen/qwen3.6-27b",
+  "openai/gpt-oss-120b",
+  "openai/gpt-oss-20b",
+]);
+
 async function groqChat(prompt: string, model: string, maxTokens: number, json: boolean) {
   const key = Deno.env.get("GROQ_API_KEY");
   if (!key) throw new Error("GROQ_API_KEY is not configured");
-  const body: Record<string, unknown> = {
-    model,
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0.7,
-    max_completion_tokens: maxTokens,
-  };
-  if (json) body.response_format = { type: "json_object" };
-  const res = await fetch(GROQ_URL, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
+  let hideReasoning = REASONING_MODELS.has(model);
+  for (let attempt = 0; ; attempt++) {
+    const body: Record<string, unknown> = {
+      model,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.7,
+      max_completion_tokens: maxTokens,
+    };
+    if (json) body.response_format = { type: "json_object" };
+    if (hideReasoning) body.reasoning_format = "hidden";
+    const res = await fetch(GROQ_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return stripReasoning((data?.choices?.[0]?.message?.content ?? "") as string);
+    }
     const e = await res.json().catch(() => ({}));
-    const err = new Error(e?.error?.message || `Groq HTTP ${res.status}`) as Error & { rateLimited?: boolean };
+    const msg = e?.error?.message || `Groq HTTP ${res.status}`;
+    // A model that doesn't accept the flag shouldn't lose its turn over it.
+    if (hideReasoning && attempt === 0 && res.status === 400) {
+      hideReasoning = false;
+      continue;
+    }
+    const err = new Error(msg) as Error & { rateLimited?: boolean };
     err.rateLimited = res.status === 429;
     // Token budgets refill on a rolling minute, so respect the server's hint
     // instead of guessing at a delay.
@@ -48,8 +69,6 @@ async function groqChat(prompt: string, model: string, maxTokens: number, json: 
     if (Number.isFinite(ra) && ra > 0) (err as { retryAfterMs?: number }).retryAfterMs = Math.min(ra * 1000, 8000);
     throw err;
   }
-  const data = await res.json();
-  return stripReasoning((data?.choices?.[0]?.message?.content ?? "") as string);
 }
 
 // Some models emit chain-of-thought in <think> blocks. None of that belongs
@@ -58,6 +77,23 @@ function stripReasoning(text: string): string {
   const THINK_BLOCK = new RegExp('<think>[\\s\\S]*?</think>', 'gi');
   const THINK_TAG = new RegExp('</?think>', 'gi');
   return text.replace(THINK_BLOCK, '').replace(THINK_TAG, '').trim();
+}
+
+// The untagged form is the dangerous one: a model narrates the work instead of
+// doing it and returns a plan Ã¢â‚¬â€ "Thinking Process:", a numbered deconstruction,
+// notes about drafting. Nothing strips that, because it isn't marked as
+// anything; it has to be recognised by shape and the turn handed to another model.
+function looksLikeReasoning(text: string): boolean {
+  const head = text.slice(0, 700);
+  return (
+    /^\s*(?:#{1,6}\s*)?(?:\*\*|__)?\s*(?:thinking|thought|reasoning|analysis|planning)(?:\s+process|\s+steps?)?(?:\*\*|__)?\s*:/i.test(
+      head,
+    ) ||
+    /\b(?:mental draft|rough text assembly|drafting the prompt|deconstruct the prd|map to \w+ structure)\b/i.test(
+      head,
+    ) ||
+    /^\s*(?:okay|alright)[,!]?\s+(?:so\b|let(?:'s| me)\b|i\b)/i.test(head)
+  );
 }
 
 function extractJson(text: string): Record<string, any> {
@@ -90,7 +126,7 @@ async function groqJson(
   const order = [opts.model || MODELS[0], ...MODELS].filter((v, i, a) => a.indexOf(v) === i);
   const full =
     `${prompt}\n\nRespond with a single JSON object and nothing else. Match this schema ` +
-    `exactly â€” populate every field and keep enum values verbatim:\n${JSON.stringify(schema)}`;
+    `exactly Ã¢â‚¬â€ populate every field and keep enum values verbatim:\n${JSON.stringify(schema)}`;
   let lastErr: unknown;
   const deadline = Date.now() + RETRY_BUDGET_MS;
   // Two passes: the first rotates models, the second waits out the rolling
@@ -122,7 +158,9 @@ async function groqText(prompt: string, maxTokens = 2600, model?: string): Promi
       if (Date.now() > deadline) break;
       try {
         const out = await groqChat(prompt, m, maxTokens, false);
-        if (out && out.trim()) return out;
+        // A leaked scratchpad is worse than no answer — it would be stored and
+        // shown as if it were the real thing. Treat it as a miss and move on.
+        if (out && out.trim() && !looksLikeReasoning(out)) return out;
       } catch (err) {
         lastErr = err;
         const e429 = err as { rateLimited?: boolean; retryAfterMs?: number };
@@ -171,11 +209,11 @@ Deno.serve(async (req) => {
     2,
   ).slice(0, 2000);
 
-  const shared = `You are Prism AI's PRD engine writing a production-grade Product Requirements Document for "${evolution.title}" â€” an original product concept born from analyzing ${project.product_name}.
+  const shared = `You are Prism AI's PRD engine writing a production-grade Product Requirements Document for "${evolution.title}" Ã¢â‚¬â€ an original product concept born from analyzing ${project.product_name}.
 
 The PRD must be detailed enough that an AI coding agent could build the product from it alone. Write in clean markdown with ## section headers. Be specific: real field names, real flows, real priorities. No filler like "this section describes...".
 
-CRITICAL â€” density over length. You have a hard output budget and MUST finish every section you are asked for:
+CRITICAL Ã¢â‚¬â€ density over length. You have a hard output budget and MUST finish every section you are asked for:
 - Keep each numbered section to roughly 120-200 words.
 - Prefer tables and tight bullets over paragraphs.
 - Never include long JSON or code samples; one short line of shape is enough.
@@ -213,11 +251,11 @@ You MUST reach section 6. Start directly with "## 1. Product Vision".`;
 Write ONLY these sections, in this order (continue numbering from 7):
 
 ## 7. Database Structure
-(every entity with fields, types, and relationships â€” use tables)
+(every entity with fields, types, and relationships Ã¢â‚¬â€ use tables)
 ## 8. Backend Architecture
 (services, background jobs, pipelines, rate limiting)
 ## 9. API Requirements
-(the 6-8 most important endpoints: method, path, payload, response, auth â€” be concise, no long JSON samples)
+(the 6-8 most important endpoints: method, path, payload, response, auth Ã¢â‚¬â€ be concise, no long JSON samples)
 
 You MUST reach section 9. Stop after it. Start directly with "## 7. Database Structure".`;
 
@@ -310,12 +348,12 @@ You MUST reach section 16. Start directly with "## 12. Notifications".`;
     // Any section still absent gets an explicit placeholder rather than a silent
     // gap, so the document never misrepresents itself as complete.
     const ordered = Array.from({ length: 16 }, (_, i) => i + 1).map((n) =>
-      blocks.get(n) ?? `## ${n}. ${SECTION_TITLES[n]}\n\n_Not generated â€” regenerate the PRD to fill this section._`,
+      blocks.get(n) ?? `## ${n}. ${SECTION_TITLES[n]}\n\n_Not generated Ã¢â‚¬â€ regenerate the PRD to fill this section._`,
     );
     body = ordered.join("\n\n");
 
     const content =
-      `# ${evolution.title} â€” Product Requirements Document\n\n` +
+      `# ${evolution.title} Ã¢â‚¬â€ Product Requirements Document\n\n` +
       `> Generated by Prism AI from the analysis of ${project.product_name}.\n\n` +
       body +
       "\n";

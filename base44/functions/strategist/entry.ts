@@ -15,6 +15,32 @@ function stripReasoning(text: string): string {
   const THINK_TAG = new RegExp('</?think>', 'gi');
   return text.replace(THINK_BLOCK, '').replace(THINK_TAG, '').trim();
 }
+
+// The untagged form is the dangerous one: a model narrates the work instead of
+// doing it and returns a plan — "Thinking Process:", a numbered deconstruction,
+// notes about drafting. Nothing strips that, because it isn't marked as
+// anything; it has to be recognised by shape and the turn handed to another model.
+function looksLikeReasoning(text: string): boolean {
+  const head = text.slice(0, 700);
+  return (
+    /^\s*(?:#{1,6}\s*)?(?:\*\*|__)?\s*(?:thinking|thought|reasoning|analysis|planning)(?:\s+process|\s+steps?)?(?:\*\*|__)?\s*:/i.test(
+      head,
+    ) ||
+    /\b(?:mental draft|rough text assembly|drafting the prompt|deconstruct the prd|map to \w+ structure)\b/i.test(
+      head,
+    ) ||
+    /^\s*(?:okay|alright)[,!]?\s+(?:so\b|let(?:'s| me)\b|i\b)/i.test(head)
+  );
+}
+
+// Reasoning-tuned models return their scratchpad alongside (or instead of) the
+// answer. Groq withholds it when asked; the guard above covers models that
+// ignore the flag.
+const REASONING_MODELS = new Set([
+  "qwen/qwen3.6-27b",
+  "openai/gpt-oss-120b",
+  "openai/gpt-oss-20b",
+]);
 const MODELS = [
   "llama-3.3-70b-versatile",
   "openai/gpt-oss-120b",
@@ -39,6 +65,7 @@ async function groqText(prompt: string, maxTokens = 1800): Promise<string> {
           messages: [{ role: "user", content: prompt }],
           temperature: 0.7,
           max_completion_tokens: maxTokens,
+          ...(REASONING_MODELS.has(model) ? { reasoning_format: "hidden" } : {}),
         }),
       });
       if (!res.ok) {
@@ -52,7 +79,9 @@ async function groqText(prompt: string, maxTokens = 1800): Promise<string> {
       }
       const data = await res.json();
       const out = stripReasoning(data?.choices?.[0]?.message?.content ?? "");
-      if (out && out.trim()) return out;
+      // A leaked scratchpad is worse than no answer — it would be shown to the
+      // user as the strategist's reply. Treat it as a miss and move on.
+      if (out && out.trim() && !looksLikeReasoning(out)) return out;
     } catch (err) {
       lastErr = err;
     }

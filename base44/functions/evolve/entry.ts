@@ -1,4 +1,4 @@
-﻿// Prism AI â€” Evolution Mode. Generates an ORIGINAL product concept inspired by
+// Prism AI Ã¢â‚¬â€ Evolution Mode. Generates an ORIGINAL product concept inspired by
 // the analysis: not a clone, a leap. Consumes innovation opportunities,
 // competitor weaknesses, and psychology/growth gaps.
 import { createClientFromRequest } from "npm:@base44/sdk";
@@ -23,24 +23,45 @@ const MODELS = [
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// Reasoning-tuned models return their scratchpad alongside (or instead of) the
+// answer. Groq withholds it when asked, and `looksLikeReasoning` catches the
+// ones that ignore the flag before their notes reach user-facing output.
+const REASONING_MODELS = new Set([
+  "qwen/qwen3.6-27b",
+  "openai/gpt-oss-120b",
+  "openai/gpt-oss-20b",
+]);
+
 async function groqChat(prompt: string, model: string, maxTokens: number, json: boolean) {
   const key = Deno.env.get("GROQ_API_KEY");
   if (!key) throw new Error("GROQ_API_KEY is not configured");
-  const body: Record<string, unknown> = {
-    model,
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0.7,
-    max_completion_tokens: maxTokens,
-  };
-  if (json) body.response_format = { type: "json_object" };
-  const res = await fetch(GROQ_URL, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
+  let hideReasoning = REASONING_MODELS.has(model);
+  for (let attempt = 0; ; attempt++) {
+    const body: Record<string, unknown> = {
+      model,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.7,
+      max_completion_tokens: maxTokens,
+    };
+    if (json) body.response_format = { type: "json_object" };
+    if (hideReasoning) body.reasoning_format = "hidden";
+    const res = await fetch(GROQ_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return stripReasoning((data?.choices?.[0]?.message?.content ?? "") as string);
+    }
     const e = await res.json().catch(() => ({}));
-    const err = new Error(e?.error?.message || `Groq HTTP ${res.status}`) as Error & { rateLimited?: boolean };
+    const msg = e?.error?.message || `Groq HTTP ${res.status}`;
+    // A model that doesn't accept the flag shouldn't lose its turn over it.
+    if (hideReasoning && attempt === 0 && res.status === 400) {
+      hideReasoning = false;
+      continue;
+    }
+    const err = new Error(msg) as Error & { rateLimited?: boolean };
     err.rateLimited = res.status === 429;
     // Token budgets refill on a rolling minute, so respect the server's hint
     // instead of guessing at a delay.
@@ -48,8 +69,6 @@ async function groqChat(prompt: string, model: string, maxTokens: number, json: 
     if (Number.isFinite(ra) && ra > 0) (err as { retryAfterMs?: number }).retryAfterMs = Math.min(ra * 1000, 8000);
     throw err;
   }
-  const data = await res.json();
-  return stripReasoning((data?.choices?.[0]?.message?.content ?? "") as string);
 }
 
 // Some models emit chain-of-thought in <think> blocks. None of that belongs
@@ -58,6 +77,23 @@ function stripReasoning(text: string): string {
   const THINK_BLOCK = new RegExp('<think>[\\s\\S]*?</think>', 'gi');
   const THINK_TAG = new RegExp('</?think>', 'gi');
   return text.replace(THINK_BLOCK, '').replace(THINK_TAG, '').trim();
+}
+
+// The untagged form is the dangerous one: a model narrates the work instead of
+// doing it and returns a plan Ã¢â‚¬â€ "Thinking Process:", a numbered deconstruction,
+// notes about drafting. Nothing strips that, because it isn't marked as
+// anything; it has to be recognised by shape and the turn handed to another model.
+function looksLikeReasoning(text: string): boolean {
+  const head = text.slice(0, 700);
+  return (
+    /^\s*(?:#{1,6}\s*)?(?:\*\*|__)?\s*(?:thinking|thought|reasoning|analysis|planning)(?:\s+process|\s+steps?)?(?:\*\*|__)?\s*:/i.test(
+      head,
+    ) ||
+    /\b(?:mental draft|rough text assembly|drafting the prompt|deconstruct the prd|map to \w+ structure)\b/i.test(
+      head,
+    ) ||
+    /^\s*(?:okay|alright)[,!]?\s+(?:so\b|let(?:'s| me)\b|i\b)/i.test(head)
+  );
 }
 
 function extractJson(text: string): Record<string, any> {
@@ -90,7 +126,7 @@ async function groqJson(
   const order = [opts.model || MODELS[0], ...MODELS].filter((v, i, a) => a.indexOf(v) === i);
   const full =
     `${prompt}\n\nRespond with a single JSON object and nothing else. Match this schema ` +
-    `exactly â€” populate every field and keep enum values verbatim:\n${JSON.stringify(schema)}`;
+    `exactly Ã¢â‚¬â€ populate every field and keep enum values verbatim:\n${JSON.stringify(schema)}`;
   let lastErr: unknown;
   const deadline = Date.now() + RETRY_BUDGET_MS;
   // Two passes: the first rotates models, the second waits out the rolling
@@ -122,7 +158,9 @@ async function groqText(prompt: string, maxTokens = 2600, model?: string): Promi
       if (Date.now() > deadline) break;
       try {
         const out = await groqChat(prompt, m, maxTokens, false);
-        if (out && out.trim()) return out;
+        // A leaked scratchpad is worse than no answer — it would be stored and
+        // shown as if it were the real thing. Treat it as a miss and move on.
+        if (out && out.trim() && !looksLikeReasoning(out)) return out;
       } catch (err) {
         lastErr = err;
         const e429 = err as { rateLimited?: boolean; retryAfterMs?: number };
@@ -168,8 +206,8 @@ Deno.serve(async (req) => {
     }
     out.push(...take(d.weaknesses, 3, (x) => `weakness: ${String(x).slice(0, 130)}`));
     out.push(...take(d.monetization_opportunities, 3, (x) => `money gap: ${String(x).slice(0, 130)}`));
-    out.push(...take(d.missing_techniques, 3, (t) => `missing: ${t?.name} â€” ${String(t?.opportunity || "").slice(0, 100)}`));
-    out.push(...take(d.opportunities, 6, (o) => `opportunity: ${o?.title} â€” ${String(o?.description || "").slice(0, 120)}`));
+    out.push(...take(d.missing_techniques, 3, (t) => `missing: ${t?.name} Ã¢â‚¬â€ ${String(t?.opportunity || "").slice(0, 100)}`));
+    out.push(...take(d.opportunities, 6, (o) => `opportunity: ${o?.title} Ã¢â‚¬â€ ${String(o?.description || "").slice(0, 120)}`));
     out.push(...take(d.competitors, 4, (c) => `rival ${c?.name}: weak at ${(c?.weaknesses || []).slice(0, 2).join("; ").slice(0, 100)}`));
     if (d.white_space) out.push(`white space: ${String(d.white_space).slice(0, 220)}`);
     return out.join("\n").slice(0, 1200);
@@ -180,7 +218,7 @@ Deno.serve(async (req) => {
     .join("\n\n")
     .slice(0, 7000);
 
-  const prompt = `You are Prism AI's Evolution Engine. You just analyzed "${project.product_name}" (${project.category}). Your job is NOT to clone it. Your job is to conceive an ORIGINAL new product that wins where the analyzed product is weak â€” powered by the untapped opportunities, competitor weaknesses, and psychology/growth gaps in the analysis below.
+  const prompt = `You are Prism AI's Evolution Engine. You just analyzed "${project.product_name}" (${project.category}). Your job is NOT to clone it. Your job is to conceive an ORIGINAL new product that wins where the analyzed product is weak Ã¢â‚¬â€ powered by the untapped opportunities, competitor weaknesses, and psychology/growth gaps in the analysis below.
 
 Rules:
 - The concept must be original and differentiated, not "${project.product_name} but better".

@@ -1,4 +1,4 @@
-﻿// Prism AI â€” re-runs a single failed (or stale) report section for a project.
+// Prism AI Ã¢â‚¬â€ re-runs a single failed (or stale) report section for a project.
 // Section definitions mirror analyze/entry.ts; keep the two in sync.
 import { createClientFromRequest } from "npm:@base44/sdk";
 
@@ -22,24 +22,45 @@ const MODELS = [
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// Reasoning-tuned models return their scratchpad alongside (or instead of) the
+// answer. Groq withholds it when asked, and `looksLikeReasoning` catches the
+// ones that ignore the flag before their notes reach user-facing output.
+const REASONING_MODELS = new Set([
+  "qwen/qwen3.6-27b",
+  "openai/gpt-oss-120b",
+  "openai/gpt-oss-20b",
+]);
+
 async function groqChat(prompt: string, model: string, maxTokens: number, json: boolean) {
   const key = Deno.env.get("GROQ_API_KEY");
   if (!key) throw new Error("GROQ_API_KEY is not configured");
-  const body: Record<string, unknown> = {
-    model,
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0.7,
-    max_completion_tokens: maxTokens,
-  };
-  if (json) body.response_format = { type: "json_object" };
-  const res = await fetch(GROQ_URL, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
+  let hideReasoning = REASONING_MODELS.has(model);
+  for (let attempt = 0; ; attempt++) {
+    const body: Record<string, unknown> = {
+      model,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.7,
+      max_completion_tokens: maxTokens,
+    };
+    if (json) body.response_format = { type: "json_object" };
+    if (hideReasoning) body.reasoning_format = "hidden";
+    const res = await fetch(GROQ_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return stripReasoning((data?.choices?.[0]?.message?.content ?? "") as string);
+    }
     const e = await res.json().catch(() => ({}));
-    const err = new Error(e?.error?.message || `Groq HTTP ${res.status}`) as Error & { rateLimited?: boolean };
+    const msg = e?.error?.message || `Groq HTTP ${res.status}`;
+    // A model that doesn't accept the flag shouldn't lose its turn over it.
+    if (hideReasoning && attempt === 0 && res.status === 400) {
+      hideReasoning = false;
+      continue;
+    }
+    const err = new Error(msg) as Error & { rateLimited?: boolean };
     err.rateLimited = res.status === 429;
     // Token budgets refill on a rolling minute, so respect the server's hint
     // instead of guessing at a delay.
@@ -47,8 +68,6 @@ async function groqChat(prompt: string, model: string, maxTokens: number, json: 
     if (Number.isFinite(ra) && ra > 0) (err as { retryAfterMs?: number }).retryAfterMs = Math.min(ra * 1000, 8000);
     throw err;
   }
-  const data = await res.json();
-  return stripReasoning((data?.choices?.[0]?.message?.content ?? "") as string);
 }
 
 // Some models emit chain-of-thought in <think> blocks. None of that belongs
@@ -57,6 +76,23 @@ function stripReasoning(text: string): string {
   const THINK_BLOCK = new RegExp('<think>[\\s\\S]*?</think>', 'gi');
   const THINK_TAG = new RegExp('</?think>', 'gi');
   return text.replace(THINK_BLOCK, '').replace(THINK_TAG, '').trim();
+}
+
+// The untagged form is the dangerous one: a model narrates the work instead of
+// doing it and returns a plan Ã¢â‚¬â€ "Thinking Process:", a numbered deconstruction,
+// notes about drafting. Nothing strips that, because it isn't marked as
+// anything; it has to be recognised by shape and the turn handed to another model.
+function looksLikeReasoning(text: string): boolean {
+  const head = text.slice(0, 700);
+  return (
+    /^\s*(?:#{1,6}\s*)?(?:\*\*|__)?\s*(?:thinking|thought|reasoning|analysis|planning)(?:\s+process|\s+steps?)?(?:\*\*|__)?\s*:/i.test(
+      head,
+    ) ||
+    /\b(?:mental draft|rough text assembly|drafting the prompt|deconstruct the prd|map to \w+ structure)\b/i.test(
+      head,
+    ) ||
+    /^\s*(?:okay|alright)[,!]?\s+(?:so\b|let(?:'s| me)\b|i\b)/i.test(head)
+  );
 }
 
 function extractJson(text: string): Record<string, any> {
@@ -89,7 +125,7 @@ async function groqJson(
   const order = [opts.model || MODELS[0], ...MODELS].filter((v, i, a) => a.indexOf(v) === i);
   const full =
     `${prompt}\n\nRespond with a single JSON object and nothing else. Match this schema ` +
-    `exactly â€” populate every field and keep enum values verbatim:\n${JSON.stringify(schema)}`;
+    `exactly Ã¢â‚¬â€ populate every field and keep enum values verbatim:\n${JSON.stringify(schema)}`;
   let lastErr: unknown;
   const deadline = Date.now() + RETRY_BUDGET_MS;
   // Two passes: the first rotates models, the second waits out the rolling
@@ -121,7 +157,9 @@ async function groqText(prompt: string, maxTokens = 2600, model?: string): Promi
       if (Date.now() > deadline) break;
       try {
         const out = await groqChat(prompt, m, maxTokens, false);
-        if (out && out.trim()) return out;
+        // A leaked scratchpad is worse than no answer — it would be stored and
+        // shown as if it were the real thing. Treat it as a miss and move on.
+        if (out && out.trim() && !looksLikeReasoning(out)) return out;
       } catch (err) {
         lastErr = err;
         const e429 = err as { rateLimited?: boolean; retryAfterMs?: number };
@@ -148,7 +186,7 @@ const SECTIONS: Record<
     title: "Business Layer",
     internet: true,
     prompt: (ctx) =>
-      `You are Prism AI, an elite product intelligence analyst. Analyze the BUSINESS LAYER of the product described below. Research how it actually makes money today. Be specific and concrete â€” name real pricing tiers, real segments, real numbers where known. Avoid generic filler.\n\nPRODUCT CONTEXT:\n${ctx}`,
+      `You are Prism AI, an elite product intelligence analyst. Analyze the BUSINESS LAYER of the product described below. Research how it actually makes money today. Be specific and concrete Ã¢â‚¬â€ name real pricing tiers, real segments, real numbers where known. Avoid generic filler.\n\nPRODUCT CONTEXT:\n${ctx}`,
     schema: {
       type: "object",
       properties: {
@@ -201,7 +239,7 @@ const SECTIONS: Record<
     title: "Design Layer",
     internet: true,
     prompt: (ctx) =>
-      `You are Prism AI, a world-class product design critic (ex-Apple, ex-Linear). Analyze the DESIGN LAYER of the product described below: UI quality, UX decisions, visual hierarchy, accessibility, mobile experience, and branding. Judge like a demanding design director â€” praise what is genuinely strong, call out what is weak with specifics.\n\nPRODUCT CONTEXT:\n${ctx}`,
+      `You are Prism AI, a world-class product design critic (ex-Apple, ex-Linear). Analyze the DESIGN LAYER of the product described below: UI quality, UX decisions, visual hierarchy, accessibility, mobile experience, and branding. Judge like a demanding design director Ã¢â‚¬â€ praise what is genuinely strong, call out what is weak with specifics.\n\nPRODUCT CONTEXT:\n${ctx}`,
     schema: {
       type: "object",
       properties: {
@@ -238,7 +276,7 @@ const SECTIONS: Record<
     title: "Technology Layer",
     internet: true,
     prompt: (ctx) =>
-      `You are Prism AI, a principal engineer doing technical due diligence. Detect the TECHNOLOGY LAYER of the product described below: frameworks, libraries, hosting, databases, authentication, payments, analytics, and AI usage. Use public evidence. Mark confidence honestly â€” 'confirmed' only when publicly documented, 'likely' for strong inference, 'possible' for educated guesses.\n\nPRODUCT CONTEXT:\n${ctx}`,
+      `You are Prism AI, a principal engineer doing technical due diligence. Detect the TECHNOLOGY LAYER of the product described below: frameworks, libraries, hosting, databases, authentication, payments, analytics, and AI usage. Use public evidence. Mark confidence honestly Ã¢â‚¬â€ 'confirmed' only when publicly documented, 'likely' for strong inference, 'possible' for educated guesses.\n\nPRODUCT CONTEXT:\n${ctx}`,
     schema: {
       type: "object",
       properties: {
@@ -354,7 +392,7 @@ const SECTIONS: Record<
     title: "Competitor Intelligence",
     internet: true,
     prompt: (ctx) =>
-      `You are Prism AI, a competitive intelligence analyst. Map the COMPETITIVE FIELD of the product described below. Find its 4-6 most relevant real competitors. Compare features, pricing, and positioning honestly â€” include at least one competitor that is genuinely threatening.\n\nPRODUCT CONTEXT:\n${ctx}`,
+      `You are Prism AI, a competitive intelligence analyst. Map the COMPETITIVE FIELD of the product described below. Find its 4-6 most relevant real competitors. Compare features, pricing, and positioning honestly Ã¢â‚¬â€ include at least one competitor that is genuinely threatening.\n\nPRODUCT CONTEXT:\n${ctx}`,
     schema: {
       type: "object",
       properties: {
@@ -384,7 +422,7 @@ const SECTIONS: Record<
     title: "Innovation Meter",
     internet: false,
     prompt: (ctx) =>
-      `You are Prism AI's Innovation Meter â€” the signature scoring engine of a product intelligence platform. Using the product analysis below, score this product's innovation and find its untapped opportunities.\n\nBe a tough grader: 90+ means genuinely category-defining, 70-89 strong, 50-69 solid but conventional, below 50 undifferentiated.\n\nFor opportunities: do NOT suggest copying competitors. Find genuinely untapped openings â€” missing features, better workflows, AI leverage, new audiences, automation, monetization, accessibility, enterprise. Each must be specific enough to act on.\n\nFULL ANALYSIS:\n${ctx}`,
+      `You are Prism AI's Innovation Meter Ã¢â‚¬â€ the signature scoring engine of a product intelligence platform. Using the product analysis below, score this product's innovation and find its untapped opportunities.\n\nBe a tough grader: 90+ means genuinely category-defining, 70-89 strong, 50-69 solid but conventional, below 50 undifferentiated.\n\nFor opportunities: do NOT suggest copying competitors. Find genuinely untapped openings Ã¢â‚¬â€ missing features, better workflows, AI leverage, new audiences, automation, monetization, accessibility, enterprise. Each must be specific enough to act on.\n\nFULL ANALYSIS:\n${ctx}`,
     schema: {
       type: "object",
       properties: {
