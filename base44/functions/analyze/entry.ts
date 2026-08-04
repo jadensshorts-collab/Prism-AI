@@ -396,8 +396,9 @@ const SECTION_MODEL: Record<string, string> = {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // Reasoning-tuned models return their scratchpad alongside (or instead of) the
-// answer. Groq withholds it when asked, and `looksLikeReasoning` catches the
-// ones that ignore the flag before their notes reach user-facing output.
+// answer. Asking Groq to withhold it is the whole defence here: every call in
+// this file requests JSON, so anything that came back as prose would fail to
+// parse rather than reach a report.
 const REASONING_MODELS = new Set([
   "qwen/qwen3.6-27b",
   "openai/gpt-oss-120b",
